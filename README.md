@@ -1,86 +1,82 @@
-# Grist Custom Widgets
+# Grist URL Filtering for Shared Links
 
-Custom widgets for Grist spreadsheets.
+Share filtered views of your Grist data with guests using URL parameters.
 
-## URL Filter Widget
+## Recommended: Grist Link Keys (No Widget Needed)
 
-A custom widget that reads query parameters from the URL and applies them as filters to the Grist page.
+Grist has built-in support for URL-based filtering using **Link Keys**:
 
-### Features
+### Step 1: Create a Shareable Link
+Add parameters to your Grist URL:
+```
+https://your-grist.com/docId/DocName?LinkKey_Status=Active&LinkKey_User=john
+```
 
-- ✅ Reads query parameters from the URL
-- ✅ Applies filters to the Grist table automatically
-- ✅ Displays active filters in a user-friendly interface
-- ✅ Supports multiple simultaneous filters
-- ✅ Works with any column names
+### Step 2: Access Link Keys in Formulas
+In any Grist formula, access the URL parameter:
+```python
+user.LinkKey.Status    # Returns "Active"
+user.LinkKey.User      # Returns "john"
+```
 
-### Usage
+### Step 3: Filter with Access Rules
+Go to **Document Settings → Access Rules** and add a rule:
 
-1. **Add the widget to your Grist document:**
-   - Open your Grist document
-   - Add a new Custom Widget section
-   - Set the widget URL to where you're hosting `url-filter-widget.html`
-   - Grant the widget "Read table" access
+| Table | Condition | Permission |
+|-------|-----------|------------|
+| YourTable | `user.LinkKey.Status == $Status` | Allow Read |
+| YourTable | `user.LinkKey.User == $AssignedTo` | Allow Read |
 
-2. **Apply filters via URL:**
-   Add query parameters to your Grist document URL:
-   ```
-   ?columnName=value&anotherColumn=value2
-   ```
+Or for a default "deny all unmatched":
+```python
+# In Access Rules for table:
+rec.Status == user.LinkKey.Status
+```
 
-3. **Example:**
-   ```
-   ?Status=Active&Priority=High&Department=Sales
-   ```
-   This will filter the table to show only rows where:
-   - Status column equals "Active"
-   - Priority column equals "High"
-   - Department column equals "Sales"
+### Step 4: Enable Guest Access
+1. Click **Share** → **Manage Users**
+2. Enable **Public Access** → set to "Viewer"
+3. Now anyone with the link + parameters sees only their filtered data
 
-### Hosting Options
+### Example URLs
+```
+# Show only "Active" items:
+https://docs.getgrist.com/abc123/MyDoc?LinkKey_Status=Active
 
-#### Option 1: GitHub Pages (Recommended)
-1. Push this repository to GitHub
-2. Enable GitHub Pages in repository settings
-3. Use the GitHub Pages URL in your Grist widget
+# Show items for specific user:
+https://docs.getgrist.com/abc123/MyDoc?LinkKey_AssignedTo=alice@example.com
 
-#### Option 2: Local Development
-1. Serve the file locally:
-   ```bash
-   python3 -m http.server 8000
-   ```
-2. Use `http://localhost:8000/url-filter-widget.html` in Grist
-   (Note: This only works for local Grist instances)
+# Multiple filters:
+https://docs.getgrist.com/abc123/MyDoc?LinkKey_Status=Open&LinkKey_Priority=High
+```
 
-#### Option 3: Any Static Hosting
-Upload `url-filter-widget.html` to any static hosting service (Netlify, Vercel, etc.)
+---
 
-### Technical Details
+## Alternative: Filter Helper Widget
 
-- Uses the [Grist Custom Widget API](https://support.getgrist.com/widget-custom/)
-- Filters are applied using the `grist.setOptions()` method
-- Query parameters are parsed using the Web URL API
-- No external dependencies beyond the Grist plugin API
+If you need more complex filtering logic or want a UI, use the included widget.
 
-### Filter Syntax
+### Setup
+1. Host `url-filter-widget.html` (GitHub Pages, etc.)
+2. Add as Custom Widget in Grist
+3. The widget reads `LinkKey_*` parameters and displays active filters
 
-- Column names are case-sensitive
-- Values are matched as strings
-- Multiple filters are combined with AND logic
-- Reserved parameters (starting with `_`, `access`, `doc`) are ignored
+### Files
+- `url-filter-widget.html` - Filter display widget
+- `README.md` - This documentation
 
-### Troubleshooting
+---
 
-**Filters not working:**
-- Ensure column names in the URL match exactly (case-sensitive)
-- Check that the widget has "Read table" access
-- Open browser console to see error messages
+## Quick Start Checklist
 
-**Widget not loading:**
-- Check that the hosting URL is accessible
-- Ensure HTTPS is used for hosted Grist instances
-- Verify the Grist plugin API script is loading
+- [ ] Add `?LinkKey_YourFilter=value` to your Grist URL
+- [ ] Create Access Rule using `user.LinkKey.YourFilter`
+- [ ] Enable Public/Guest access
+- [ ] Share the parameterized URL
 
-### License
+## Security Notes
 
-MIT
+- Link Keys are visible in the URL - don't use for sensitive auth
+- Access Rules enforce server-side filtering (secure)
+- Guests only see data matching their Link Key values
+- Different links = different filtered views of same document

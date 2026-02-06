@@ -44,11 +44,6 @@
             font-size: 14px;
             color: #333;
         }
-        .filter-list {
-            list-style: none;
-            padding: 0;
-            margin: 0;
-        }
         .filter-item {
             padding: 8px 12px;
             background: #e8f5e9;
@@ -109,7 +104,7 @@
 </head>
 <body>
     <div class="container">
-        <h2>🔍 URL Filter Widget</h2>
+        <h2>🔍 Dynamic Filter Widget</h2>
         
         <div id="status" class="status info">
             Initializing widget...
@@ -123,19 +118,20 @@
         </div>
 
         <div class="info-section">
-            <h3>Usage</h3>
-            <p><strong>Option 1:</strong> Add filters to the Widget URL in Grist settings:</p>
-            <p><code>https://your-host/url-filter-widget.html?Status=Active</code></p>
-            <p style="margin-top: 15px;"><strong>Option 2:</strong> The widget listens for <code>postMessage</code> from the parent:</p>
-            <p><code>iframe.contentWindow.postMessage({filters: {Status: 'Active'}}, '*')</code></p>
+            <h3>Setup Instructions</h3>
+            <p><strong>1.</strong> Create a table with columns for your filter config (e.g., <code>FilterColumn</code>, <code>FilterValue</code>)</p>
+            <p><strong>2.</strong> In widget settings, map columns: select which column contains filter names and which contains values</p>
+            <p><strong>3.</strong> Use "Select By" to link this widget to your config table</p>
+            <p><strong>4.</strong> When you select/change rows in the config table, filters update automatically!</p>
         </div>
     </div>
 
     <script>
         let gristReady = false;
         let currentFilters = {};
+        let mappedColumns = {};
 
-        // Parse URL query parameters from widget URL
+        // Parse URL query parameters from widget URL (fallback)
         function getWidgetUrlParams() {
             const params = new URLSearchParams(window.location.search);
             const filters = {};
@@ -147,80 +143,8 @@
             return filters;
         }
 
-        // Try to get parent URL (only works same-origin)
-        function tryGetParentParams() {
-            try {
-                const parentSearch = window.parent.location.search;
-                const params = new URLSearchParams(parentSearch);
-                const filters = {};
-                for (const [key, value] of params) {
-                    if (!key.startsWith('_') && key !== 'access' && key !== 'doc') {
-                        filters[key] = value;
-                    }
-                }
-                return { success: true, filters, source: 'parent URL' };
-            } catch (e) {
-                return { success: false, filters: {}, source: null };
-            }
-        }
-
-        // Parse referrer URL (limited - may not include query params)
-        function tryGetReferrerParams() {
-            try {
-                if (document.referrer) {
-                    const url = new URL(document.referrer);
-                    const params = new URLSearchParams(url.search);
-                    const filters = {};
-                    for (const [key, value] of params) {
-                        if (!key.startsWith('_') && key !== 'access' && key !== 'doc') {
-                            filters[key] = value;
-                        }
-                    }
-                    if (Object.keys(filters).length > 0) {
-                        return { success: true, filters, source: 'referrer' };
-                    }
-                }
-            } catch (e) {
-                console.log('Could not parse referrer:', e);
-            }
-            return { success: false, filters: {}, source: null };
-        }
-
-        // Get filters from all available sources
-        function getAllFilters() {
-            const sources = [];
-            
-            // Source 1: Widget URL params (most reliable)
-            const widgetParams = getWidgetUrlParams();
-            if (Object.keys(widgetParams).length > 0) {
-                sources.push({ filters: widgetParams, source: 'widget URL' });
-            }
-
-            // Source 2: Try parent URL (same-origin only)
-            const parentResult = tryGetParentParams();
-            if (parentResult.success && Object.keys(parentResult.filters).length > 0) {
-                sources.push({ filters: parentResult.filters, source: parentResult.source });
-            }
-
-            // Source 3: Try referrer
-            const referrerResult = tryGetReferrerParams();
-            if (referrerResult.success) {
-                sources.push({ filters: referrerResult.filters, source: referrerResult.source });
-            }
-
-            // Merge all filters (later sources override earlier)
-            let merged = {};
-            let usedSources = [];
-            for (const src of sources) {
-                merged = { ...merged, ...src.filters };
-                usedSources.push(src.source);
-            }
-
-            return { filters: merged, sources: usedSources };
-        }
-
         // Display filters in the UI
-        function displayFilters(filters, sources = []) {
+        function displayFilters(filters, source = '') {
             const display = document.getElementById('filters-display');
             
             if (Object.keys(filters).length === 0) {
@@ -228,14 +152,14 @@
                 return;
             }
 
-            const sourceTag = sources.length > 0 
-                ? `<span class="source-tag">from: ${sources.join(', ')}</span>` 
+            const sourceTag = source 
+                ? `<span class="source-tag">from: ${source}</span>` 
                 : '';
 
             const filterList = Object.entries(filters).map(([key, value]) => {
                 return `<div class="filter-item">
                     <span class="filter-key">${escapeHtml(key)}</span>: 
-                    <span class="filter-value">${escapeHtml(value)}</span>
+                    <span class="filter-value">${escapeHtml(String(value))}</span>
                 </div>`;
             }).join('');
 
@@ -256,10 +180,10 @@
             status.className = `status ${type}`;
         }
 
-        // Apply filters to Grist using setCursorPos with linking
+        // Apply filters by setting cursor position / selection
         async function applyFilters(filters) {
             if (!gristReady) {
-                console.log('Grist not ready yet, skipping filter application');
+                console.log('Grist not ready yet');
                 return;
             }
 
@@ -267,16 +191,13 @@
                 const filterCount = Object.keys(filters).length;
                 
                 if (filterCount > 0) {
-                    // Store filters in widget options so they persist
+                    // Store filters in widget options
                     await grist.setOption('activeFilters', filters);
-                    
-                    // Use setSelectedRows or onRecord to trigger linking
-                    // The actual filtering happens through SELECT BY linking in Grist
-                    updateStatus(`✓ Applied ${filterCount} filter(s) successfully`, 'success');
-                    console.log('Filters applied:', filters);
+                    updateStatus(`✓ ${filterCount} filter(s) active`, 'success');
+                    console.log('Filters stored:', filters);
                 } else {
                     await grist.setOption('activeFilters', null);
-                    updateStatus('No filters to apply', 'info');
+                    updateStatus('No filters active', 'info');
                 }
             } catch (error) {
                 console.error('Error applying filters:', error);
@@ -284,84 +205,150 @@
             }
         }
 
-        // Listen for postMessage from parent window
-        function setupPostMessageListener() {
-            window.addEventListener('message', async (event) => {
-                console.log('Received postMessage:', event.data);
-                
-                // Handle filter updates via postMessage
-                if (event.data && event.data.filters && typeof event.data.filters === 'object') {
-                    currentFilters = { ...currentFilters, ...event.data.filters };
-                    displayFilters(currentFilters, ['postMessage']);
-                    await applyFilters(currentFilters);
+        // Parse filters from record data
+        function parseFiltersFromRecord(record, columns) {
+            const filters = {};
+            
+            if (!record || !columns) return filters;
+
+            // Method 1: Column mapping - FilterColumn contains the column name, FilterValue contains the value
+            if (columns.FilterColumn && columns.FilterValue) {
+                const colName = record[columns.FilterColumn];
+                const colValue = record[columns.FilterValue];
+                if (colName && colValue !== undefined && colValue !== null && colValue !== '') {
+                    filters[colName] = colValue;
                 }
-                
-                // Handle URL string with params
-                if (event.data && event.data.url && typeof event.data.url === 'string') {
+            }
+            
+            // Method 2: JSON config in a single column
+            if (columns.FilterConfig) {
+                const configStr = record[columns.FilterConfig];
+                if (configStr) {
                     try {
-                        const url = new URL(event.data.url);
-                        const params = new URLSearchParams(url.search);
-                        const filters = {};
-                        for (const [key, value] of params) {
-                            if (!key.startsWith('_') && key !== 'access' && key !== 'doc') {
-                                filters[key] = value;
-                            }
-                        }
-                        if (Object.keys(filters).length > 0) {
-                            currentFilters = { ...currentFilters, ...filters };
-                            displayFilters(currentFilters, ['postMessage URL']);
-                            await applyFilters(currentFilters);
-                        }
+                        const parsed = JSON.parse(configStr);
+                        Object.assign(filters, parsed);
                     } catch (e) {
-                        console.error('Could not parse URL from postMessage:', e);
+                        // Try key=value format: "Status=Active,Priority=High"
+                        if (typeof configStr === 'string' && configStr.includes('=')) {
+                            configStr.split(',').forEach(pair => {
+                                const [key, value] = pair.split('=').map(s => s.trim());
+                                if (key && value) {
+                                    filters[key] = value;
+                                }
+                            });
+                        }
                     }
                 }
-            });
+            }
+
+            // Method 3: Direct column values - any mapped column becomes a filter
+            // Column name = filter column, cell value = filter value
+            for (const [mappedName, actualCol] of Object.entries(columns)) {
+                if (!['FilterColumn', 'FilterValue', 'FilterConfig'].includes(mappedName)) {
+                    const value = record[actualCol];
+                    if (value !== undefined && value !== null && value !== '') {
+                        filters[mappedName] = value;
+                    }
+                }
+            }
+
+            return filters;
+        }
+
+        // Parse filters from multiple records (for bulk filtering)
+        function parseFiltersFromRecords(records, columns) {
+            const allFilters = {};
+            
+            for (const record of records) {
+                const recordFilters = parseFiltersFromRecord(record, columns);
+                // For multiple records with same filter column, collect values
+                for (const [key, value] of Object.entries(recordFilters)) {
+                    if (allFilters[key]) {
+                        // Multiple values for same filter - create array
+                        if (Array.isArray(allFilters[key])) {
+                            allFilters[key].push(value);
+                        } else {
+                            allFilters[key] = [allFilters[key], value];
+                        }
+                    } else {
+                        allFilters[key] = value;
+                    }
+                }
+            }
+            
+            return allFilters;
         }
 
         // Initialize the widget
         async function init() {
             try {
-                // Setup postMessage listener first
-                setupPostMessageListener();
+                // Get URL params as fallback
+                const urlFilters = getWidgetUrlParams();
+                if (Object.keys(urlFilters).length > 0) {
+                    currentFilters = urlFilters;
+                    displayFilters(currentFilters, 'URL params');
+                }
 
-                // Get filters from all available sources
-                const { filters, sources } = getAllFilters();
-                currentFilters = filters;
-                displayFilters(currentFilters, sources);
-
-                // Initialize Grist widget
+                // Configure column mappings for the widget
                 grist.ready({
                     requiredAccess: 'read table',
                     allowSelectBy: true,
-                    columns: []  // Accept any columns
+                    columns: [
+                        { name: 'FilterColumn', title: 'Filter Column Name', optional: true, type: 'Text' },
+                        { name: 'FilterValue', title: 'Filter Value', optional: true, type: 'Any' },
+                        { name: 'FilterConfig', title: 'Filter Config (JSON or key=value)', optional: true, type: 'Text' },
+                    ]
                 });
                 
                 gristReady = true;
                 console.log('Grist widget ready');
 
-                // Apply initial filters
-                await applyFilters(currentFilters);
-
-                // Also check for stored filters from Grist options
-                try {
-                    const storedFilters = await grist.getOption('activeFilters');
-                    if (storedFilters && Object.keys(storedFilters).length > 0 && Object.keys(currentFilters).length === 0) {
-                        currentFilters = storedFilters;
-                        displayFilters(currentFilters, ['stored options']);
-                        await applyFilters(currentFilters);
+                // Listen for record selection changes (via SELECT BY linking)
+                grist.onRecord(async (record, mappings) => {
+                    console.log('Record selected:', record, 'Mappings:', mappings);
+                    
+                    if (record && mappings) {
+                        mappedColumns = mappings;
+                        const filters = parseFiltersFromRecord(record, mappings);
+                        
+                        if (Object.keys(filters).length > 0) {
+                            currentFilters = filters;
+                            displayFilters(currentFilters, 'selected record');
+                            await applyFilters(currentFilters);
+                        }
                     }
-                } catch (e) {
-                    console.log('No stored filters found');
+                });
+
+                // Also listen for full records (multiple selection)
+                grist.onRecords(async (records, mappings) => {
+                    console.log('Records received:', records?.length, 'Mappings:', mappings);
+                    
+                    if (records && records.length > 0 && mappings) {
+                        mappedColumns = mappings;
+                        const filters = parseFiltersFromRecords(records, mappings);
+                        
+                        if (Object.keys(filters).length > 0) {
+                            currentFilters = filters;
+                            displayFilters(currentFilters, `${records.length} record(s)`);
+                            await applyFilters(currentFilters);
+                        }
+                    }
+                });
+
+                // Apply URL filters if any
+                if (Object.keys(urlFilters).length > 0) {
+                    await applyFilters(urlFilters);
+                } else {
+                    updateStatus('Waiting for filter selection...', 'info');
                 }
 
             } catch (error) {
                 console.error('Initialization error:', error);
-                updateStatus(`✗ Initialization failed: ${error.message}`, 'error');
+                updateStatus(`✗ Init failed: ${error.message}`, 'error');
             }
         }
 
-        // Start initialization when DOM is ready
+        // Start initialization
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', init);
         } else {

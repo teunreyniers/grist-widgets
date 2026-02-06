@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shift Availability Toggle</title>
+    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            margin: 0;
+            padding: 16px;
+            background: #f8f9fa;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        h2 {
+            margin: 0 0 16px 0;
+            color: #333;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .status {
+            padding: 10px 14px;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            font-size: 13px;
+        }
+        .status.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .status.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .status.info { background: #e7f1ff; color: #0c5460; border: 1px solid #b8daff; }
+        .status.warning { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+
+        .assistant-info {
+            background: white;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .assistant-name {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .shifts-grid {
+            display: grid;
+            gap: 12px;
+        }
+        .shift-card {
+            background: white;
+            border-radius: 8px;
+            padding: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.2s ease;
+        }
+        .shift-card:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        .shift-info {
+            flex: 1;
+        }
+        .shift-name {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 4px;
+        }
+        .shift-details {
+            font-size: 13px;
+            color: #666;
+        }
+
+        .toggle-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            min-width: 120px;
+        }
+        .toggle-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .toggle-btn.available {
+            background: #28a745;
+            color: white;
+        }
+        .toggle-btn.available:hover:not(:disabled) {
+            background: #218838;
+        }
+        .toggle-btn.unavailable {
+            background: #dc3545;
+            color: white;
+        }
+        .toggle-btn.unavailable:hover:not(:disabled) {
+            background: #c82333;
+        }
+        .toggle-btn.unknown {
+            background: #6c757d;
+            color: white;
+        }
+        .toggle-btn.unknown:hover:not(:disabled) {
+            background: #5a6268;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            background: white;
+            border-radius: 8px;
+        }
+
+        .setup-instructions {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .setup-instructions h3 {
+            margin: 0 0 12px 0;
+            font-size: 14px;
+            color: #333;
+        }
+        .setup-instructions ol {
+            margin: 0;
+            padding-left: 20px;
+            color: #555;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .setup-instructions code {
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>📅 Shift Availability</h2>
+        
+        <div id="status" class="status info">Initializing...</div>
+        
+        <div id="assistant-info" class="assistant-info" style="display: none;">
+            Setting availability for: <span id="assistant-name" class="assistant-name"></span>
+        </div>
+
+        <div id="content">
+            <div class="loading">Loading shifts...</div>
+        </div>
+
+        <div id="setup" class="setup-instructions" style="display: none;">
+            <h3>Setup Instructions</h3>
+            <ol>
+                <li>Create three tables: <code>Shifts</code>, <code>Assistants</code>, and <code>Availability</code></li>
+                <li>The <code>Availability</code> table should have:
+                    <ul>
+                        <li>A reference column to <code>Shifts</code></li>
+                        <li>A reference column to <code>Assistants</code></li>
+                        <li>A <code>Status</code> column (text: "Available" or "Unavailable")</li>
+                    </ul>
+                </li>
+                <li>Add this widget and configure columns in widget settings</li>
+                <li>Use "Select By" to link to your <code>Assistants</code> table</li>
+                <li>Grant "Full document access" in widget settings for write capability</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        let config = {
+            shiftsTable: null,
+            availabilityTable: null,
+            shiftRefColumn: null,
+            assistantRefColumn: null,
+            statusColumn: null,
+            shiftDisplayColumn: null,
+            shiftDetailsColumn: null,
+            availableValue: 'Available',
+            unavailableValue: 'Unavailable'
+        };
+
+        let currentAssistant = null;
+        let shifts = [];
+        let availabilityMap = {}; // shiftId -> { recordId, status }
+        let isReady = false;
+        let hasWriteAccess = false;
+
+        function updateStatus(message, type = 'info') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+        }
+
+        function showSetup() {
+            document.getElementById('setup').style.display = 'block';
+        }
+
+        function hideSetup() {
+            document.getElementById('setup').style.display = 'none';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        async function loadConfig() {
+            try {
+                const options = await grist.widgetApi.getOptions();
+                if (options) {
+                    config = { ...config, ...options };
+                }
+                return config.shiftsTable && config.availabilityTable;
+            } catch (e) {
+                console.error('Error loading config:', e);
+                return false;
+            }
+        }
+
+        async function saveConfig() {
+            try {
+                await grist.widgetApi.setOptions(config);
+            } catch (e) {
+                console.error('Error saving config:', e);
+            }
+        }
+
+        async function fetchShifts() {
+            if (!config.shiftsTable) return [];
+            
+            try {
+                const table = await grist.docApi.fetchTable(config.shiftsTable);
+                const records = [];
+                const ids = table.id;
+                
+                for (let i = 0; i < ids.length; i++) {
+                    const record = { id: ids[i] };
+                    for (const col of Object.keys(table)) {
+                        record[col] = table[col][i];
+                    }
+                    records.push(record);
+                }
+                return records;
+            } catch (e) {
+                console.error('Error fetching shifts:', e);
+                return [];
+            }
+        }
+
+        async function fetchAvailability(assistantId) {
+            if (!config.availabilityTable || !assistantId) return {};
+            
+            try {
+                const table = await grist.docApi.fetchTable(config.availabilityTable);
+                const map = {};
+                const ids = table.id;
+                
+                for (let i = 0; i < ids.length; i++) {
+                    const refCol = config.assistantRefColumn || 'Assistant';
+                    const assistantRef = table[refCol]?.[i];
+                    
+                    // Handle both direct ID and reference format
+                    const refId = typeof assistantRef === 'number' ? assistantRef : assistantRef;
+                    
+                    if (refId === assistantId) {
+                        const shiftCol = config.shiftRefColumn || 'Shift';
+                        const shiftRef = table[shiftCol]?.[i];
+                        const shiftId = typeof shiftRef === 'number' ? shiftRef : shiftRef;
+                        const statusCol = config.statusColumn || 'Status';
+                        
+                        map[shiftId] = {
+                            recordId: ids[i],
+                            status: table[statusCol]?.[i]
+                        };
+                    }
+                }
+                return map;
+            } catch (e) {
+                console.error('Error fetching availability:', e);
+                return {};
+            }
+        }
+
+        async function toggleAvailability(shiftId, currentStatus) {
+            if (!hasWriteAccess) {
+                updateStatus('No write access - enable "Full document access" in widget settings', 'error');
+                return;
+            }
+            
+            if (!currentAssistant) {
+                updateStatus('No assistant selected', 'error');
+                return;
+            }
+
+            const newStatus = currentStatus === config.availableValue 
+                ? config.unavailableValue 
+                : config.availableValue;
+
+            try {
+                const existing = availabilityMap[shiftId];
+                const statusCol = config.statusColumn || 'Status';
+                
+                if (existing) {
+                    // Update existing record
+                    await grist.docApi.applyUserActions([
+                        ['UpdateRecord', config.availabilityTable, existing.recordId, {
+                            [statusCol]: newStatus
+                        }]
+                    ]);
+                    availabilityMap[shiftId].status = newStatus;
+                } else {
+                    // Create new record
+                    const shiftCol = config.shiftRefColumn || 'Shift';
+                    const assistantCol = config.assistantRefColumn || 'Assistant';
+                    
+                    const result = await grist.docApi.applyUserActions([
+                        ['AddRecord', config.availabilityTable, null, {
+                            [shiftCol]: shiftId,
+                            [assistantCol]: currentAssistant.id,
+                            [statusCol]: newStatus
+                        }]
+                    ]);
+                    
+                    // Store the new record ID
+                    if (result && result.retValues && result.retValues[0]) {
+                        availabilityMap[shiftId] = {
+                            recordId: result.retValues[0],
+                            status: newStatus
+                        };
+                    }
+                }
+                
+                renderShifts();
+                updateStatus(`Updated: ${newStatus}`, 'success');
+                
+            } catch (e) {
+                console.error('Error toggling availability:', e);
+                updateStatus(`Error: ${e.message}`, 'error');
+            }
+        }
+
+        function renderShifts() {
+            const content = document.getElementById('content');
+            
+            if (shifts.length === 0) {
+                content.innerHTML = '<div class="empty-state">No shifts found</div>';
+                return;
+            }
+
+            const displayCol = config.shiftDisplayColumn || 'Name';
+            const detailsCol = config.shiftDetailsColumn;
+
+            const html = `<div class="shifts-grid">
+                ${shifts.map(shift => {
+                    const availability = availabilityMap[shift.id];
+                    const status = availability?.status;
+                    const isAvailable = status === config.availableValue;
+                    const isUnavailable = status === config.unavailableValue;
+                    
+                    let btnClass = 'unknown';
+                    let btnText = 'Set Availability';
+                    
+                    if (isAvailable) {
+                        btnClass = 'available';
+                        btnText = '✓ Available';
+                    } else if (isUnavailable) {
+                        btnClass = 'unavailable';
+                        btnText = '✗ Unavailable';
+                    }
+
+                    const shiftName = shift[displayCol] || `Shift ${shift.id}`;
+                    const shiftDetails = detailsCol && shift[detailsCol] ? shift[detailsCol] : '';
+
+                    return `<div class="shift-card">
+                        <div class="shift-info">
+                            <div class="shift-name">${escapeHtml(String(shiftName))}</div>
+                            ${shiftDetails ? `<div class="shift-details">${escapeHtml(String(shiftDetails))}</div>` : ''}
+                        </div>
+                        <button class="toggle-btn ${btnClass}" 
+                                onclick="toggleAvailability(${shift.id}, '${status || ''}')"
+                                ${!currentAssistant ? 'disabled' : ''}>
+                            ${btnText}
+                        </button>
+                    </div>`;
+                }).join('')}
+            </div>`;
+            
+            content.innerHTML = html;
+        }
+
+        async function refresh() {
+            if (!currentAssistant) {
+                document.getElementById('assistant-info').style.display = 'none';
+                updateStatus('Select an assistant to set availability', 'info');
+                renderShifts();
+                return;
+            }
+
+            document.getElementById('assistant-info').style.display = 'block';
+            
+            shifts = await fetchShifts();
+            availabilityMap = await fetchAvailability(currentAssistant.id);
+            
+            renderShifts();
+            updateStatus(`Showing ${shifts.length} shift(s)`, 'success');
+        }
+
+        async function init() {
+            try {
+                // Check for write access
+                try {
+                    const accessLevel = await grist.sectionApi.getAccessLevel();
+                    hasWriteAccess = accessLevel === 'full';
+                } catch (e) {
+                    hasWriteAccess = false;
+                }
+
+                grist.ready({
+                    requiredAccess: 'full',
+                    allowSelectBy: true,
+                    columns: [
+                        { name: 'Name', title: 'Assistant Name', optional: true, type: 'Any' }
+                    ],
+                    onEditOptions: async () => {
+                        // Show configuration dialog
+                        const tables = await grist.docApi.listTables();
+                        
+                        const newConfig = {
+                            shiftsTable: prompt('Shifts table name:', config.shiftsTable || tables[0]),
+                            availabilityTable: prompt('Availability table name:', config.availabilityTable || ''),
+                            shiftRefColumn: prompt('Shift reference column in Availability:', config.shiftRefColumn || 'Shift'),
+                            assistantRefColumn: prompt('Assistant reference column in Availability:', config.assistantRefColumn || 'Assistant'),
+                            statusColumn: prompt('Status column in Availability:', config.statusColumn || 'Status'),
+                            shiftDisplayColumn: prompt('Display column in Shifts:', config.shiftDisplayColumn || 'Name'),
+                            shiftDetailsColumn: prompt('Details column in Shifts (optional):', config.shiftDetailsColumn || ''),
+                            availableValue: prompt('Value for "available":', config.availableValue || 'Available'),
+                            unavailableValue: prompt('Value for "unavailable":', config.unavailableValue || 'Unavailable')
+                        };
+                        
+                        config = { ...config, ...newConfig };
+                        await saveConfig();
+                        await refresh();
+                    }
+                });
+
+                isReady = true;
+
+                // Load saved configuration
+                const hasConfig = await loadConfig();
+                
+                if (!hasConfig) {
+                    showSetup();
+                    updateStatus('Configure widget in settings (click gear icon)', 'warning');
+                    
+                    // Try auto-detection
+                    try {
+                        const tables = await grist.docApi.listTables();
+                        const shiftsTable = tables.find(t => t.toLowerCase().includes('shift'));
+                        const availTable = tables.find(t => t.toLowerCase().includes('avail'));
+                        
+                        if (shiftsTable && availTable) {
+                            config.shiftsTable = shiftsTable;
+                            config.availabilityTable = availTable;
+                            await saveConfig();
+                            hideSetup();
+                            updateStatus('Auto-detected tables - verify in settings', 'info');
+                        }
+                    } catch (e) {
+                        console.log('Auto-detection failed:', e);
+                    }
+                } else {
+                    hideSetup();
+                }
+
+                // Listen for assistant selection
+                grist.onRecord(async (record, mappings) => {
+                    console.log('Record selected:', record);
+                    
+                    if (record) {
+                        const nameCol = mappings?.Name || 'Name';
+                        currentAssistant = {
+                            id: record.id,
+                            name: record[nameCol] || `Assistant ${record.id}`
+                        };
+                        document.getElementById('assistant-name').textContent = currentAssistant.name;
+                    } else {
+                        currentAssistant = null;
+                    }
+                    
+                    await refresh();
+                });
+
+                // Initial load
+                await refresh();
+
+            } catch (error) {
+                console.error('Initialization error:', error);
+                updateStatus(`Init failed: ${error.message}`, 'error');
+                showSetup();
+            }
+        }
+
+        // Expose toggle function globally
+        window.toggleAvailability = toggleAvailability;
+
+        // Start
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    </script>
+</body>
+</html>
