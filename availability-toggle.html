@@ -204,7 +204,7 @@
         let shifts = [];
         let availabilityMap = {}; // shiftId -> { recordId, status }
         let isReady = false;
-        let hasWriteAccess = false;
+        let hasWriteAccess = true; // Assume true, will be updated by onOptions
 
         function updateStatus(message, type = 'info') {
             const status = document.getElementById('status');
@@ -429,13 +429,11 @@
 
         async function init() {
             try {
-                // Check for write access
-                try {
-                    const accessLevel = await grist.sectionApi.getAccessLevel();
-                    hasWriteAccess = accessLevel === 'full';
-                } catch (e) {
-                    hasWriteAccess = false;
-                }
+                // Check access level after ready
+                grist.onOptions(async (options, interaction) => {
+                    hasWriteAccess = interaction?.accessLevel === 'full';
+                    console.log('Access level:', interaction?.accessLevel, 'hasWriteAccess:', hasWriteAccess);
+                });
 
                 grist.ready({
                     requiredAccess: 'full',
