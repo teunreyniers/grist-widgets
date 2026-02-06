@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>URL Filter Widget</title>
+    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h2 {
+            margin: 0 0 20px 0;
+            color: #333;
+            font-size: 18px;
+        }
+        .info-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f9f9f9;
+            border-left: 4px solid #4CAF50;
+            border-radius: 4px;
+        }
+        .info-section h3 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .info-section p {
+            margin: 5px 0;
+            font-size: 14px;
+            color: #333;
+        }
+        .filter-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .filter-item {
+            padding: 8px 12px;
+            background: #e8f5e9;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+        .filter-key {
+            font-weight: bold;
+            color: #2e7d32;
+        }
+        .filter-value {
+            color: #1976d2;
+        }
+        .empty-state {
+            color: #999;
+            font-style: italic;
+            padding: 20px;
+            text-align: center;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            font-size: 13px;
+        }
+        .status.success {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #4CAF50;
+        }
+        .status.error {
+            background: #ffebee;
+            color: #c62828;
+            border: 1px solid #f44336;
+        }
+        .status.info {
+            background: #e3f2fd;
+            color: #1565c0;
+            border: 1px solid #2196F3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🔍 URL Filter Widget</h2>
+        
+        <div id="status" class="status info">
+            Initializing widget...
+        </div>
+
+        <div class="info-section">
+            <h3>Active Filters</h3>
+            <div id="filters-display">
+                <p class="empty-state">No filters applied</p>
+            </div>
+        </div>
+
+        <div class="info-section">
+            <h3>Usage Instructions</h3>
+            <p>Add query parameters to the URL to filter the data:</p>
+            <p><code>?columnName=value&amp;anotherColumn=value2</code></p>
+            <p>Example: <code>?Status=Active&amp;Priority=High</code></p>
+        </div>
+    </div>
+
+    <script>
+        let gristReady = false;
+        let currentFilters = {};
+
+        // Parse URL query parameters
+        function getQueryParams() {
+            const params = new URLSearchParams(window.location.search);
+            const filters = {};
+            for (const [key, value] of params) {
+                // Skip common widget parameters that aren't filters
+                if (!key.startsWith('_') && key !== 'access' && key !== 'doc') {
+                    filters[key] = value;
+                }
+            }
+            return filters;
+        }
+
+        // Display filters in the UI
+        function displayFilters(filters) {
+            const display = document.getElementById('filters-display');
+            
+            if (Object.keys(filters).length === 0) {
+                display.innerHTML = '<p class="empty-state">No filters applied</p>';
+                return;
+            }
+
+            const filterList = Object.entries(filters).map(([key, value]) => {
+                return `<div class="filter-item">
+                    <span class="filter-key">${escapeHtml(key)}</span>: 
+                    <span class="filter-value">${escapeHtml(value)}</span>
+                </div>`;
+            }).join('');
+
+            display.innerHTML = filterList;
+        }
+
+        // Escape HTML for safe display
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Update status message
+        function updateStatus(message, type = 'info') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+        }
+
+        // Apply filters to Grist
+        async function applyFilters(filters) {
+            if (!gristReady) {
+                console.log('Grist not ready yet, skipping filter application');
+                return;
+            }
+
+            try {
+                // Build filter array for Grist
+                // Each filter is an array: [columnName, value]
+                const filterArray = Object.entries(filters).map(([col, val]) => [col, val]);
+                
+                if (filterArray.length > 0) {
+                    // Apply filters using setOptions
+                    await grist.setOptions({
+                        filters: filterArray
+                    });
+                    
+                    updateStatus(`✓ Applied ${filterArray.length} filter(s) successfully`, 'success');
+                    console.log('Filters applied:', filterArray);
+                } else {
+                    // Clear filters
+                    await grist.setOptions({
+                        filters: []
+                    });
+                    updateStatus('No filters to apply', 'info');
+                }
+            } catch (error) {
+                console.error('Error applying filters:', error);
+                updateStatus(`✗ Error applying filters: ${error.message}`, 'error');
+            }
+        }
+
+        // Initialize the widget
+        async function init() {
+            try {
+                // Get filters from URL
+                currentFilters = getQueryParams();
+                displayFilters(currentFilters);
+
+                // Initialize Grist widget
+                await grist.ready({
+                    requiredAccess: 'read table',
+                    allowSelectBy: true
+                });
+                
+                gristReady = true;
+                console.log('Grist widget ready');
+
+                // Apply filters
+                await applyFilters(currentFilters);
+
+                // Listen for URL changes (if widget is reloaded)
+                window.addEventListener('hashchange', async () => {
+                    currentFilters = getQueryParams();
+                    displayFilters(currentFilters);
+                    await applyFilters(currentFilters);
+                });
+
+            } catch (error) {
+                console.error('Initialization error:', error);
+                updateStatus(`✗ Initialization failed: ${error.message}`, 'error');
+            }
+        }
+
+        // Start initialization when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    </script>
+</body>
+</html>
