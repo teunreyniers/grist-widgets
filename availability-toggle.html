@@ -24,6 +24,21 @@
             color: #333;
             font-size: 18px;
             font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .settings-toggle {
+            font-size: 13px;
+            padding: 6px 12px;
+            background: #e9ecef;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            color: #495057;
+        }
+        .settings-toggle:hover {
+            background: #dee2e6;
         }
         .status {
             padding: 10px 14px;
@@ -127,6 +142,93 @@
             border-radius: 8px;
         }
 
+        /* Settings Panel */
+        .settings-panel {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: none;
+        }
+        .settings-panel.visible {
+            display: block;
+        }
+        .settings-panel h3 {
+            margin: 0 0 16px 0;
+            font-size: 15px;
+            color: #333;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 8px;
+        }
+        .settings-group {
+            margin-bottom: 20px;
+        }
+        .settings-group-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+        }
+        .setting-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .setting-row label {
+            flex: 0 0 180px;
+            font-size: 13px;
+            color: #495057;
+        }
+        .setting-row select,
+        .setting-row input {
+            flex: 1;
+            padding: 8px 10px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 13px;
+            max-width: 250px;
+        }
+        .setting-row select:focus,
+        .setting-row input:focus {
+            outline: none;
+            border-color: #80bdff;
+            box-shadow: 0 0 0 2px rgba(0,123,255,0.15);
+        }
+        .settings-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid #eee;
+        }
+        .btn-save {
+            padding: 8px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .btn-save:hover {
+            background: #0056b3;
+        }
+        .btn-cancel {
+            padding: 8px 20px;
+            background: #e9ecef;
+            color: #495057;
+            border: none;
+            border-radius: 4px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .btn-cancel:hover {
+            background: #dee2e6;
+        }
+
         .setup-instructions {
             background: white;
             padding: 20px;
@@ -156,9 +258,74 @@
 </head>
 <body>
     <div class="container">
-        <h2>📅 Shift Availability</h2>
+        <h2>
+            📅 Shift Availability
+            <button class="settings-toggle" onclick="toggleSettings()">⚙️ Settings</button>
+        </h2>
         
         <div id="status" class="status info">Initializing...</div>
+
+        <!-- Settings Panel -->
+        <div id="settings-panel" class="settings-panel">
+            <h3>Widget Configuration</h3>
+            
+            <div class="settings-group">
+                <div class="settings-group-title">Tables</div>
+                <div class="setting-row">
+                    <label>Shifts Table</label>
+                    <select id="cfg-shiftsTable"></select>
+                </div>
+                <div class="setting-row">
+                    <label>Availability Table</label>
+                    <select id="cfg-availabilityTable"></select>
+                </div>
+            </div>
+
+            <div class="settings-group">
+                <div class="settings-group-title">Availability Table Columns</div>
+                <div class="setting-row">
+                    <label>Shift Reference Column</label>
+                    <input type="text" id="cfg-shiftRefColumn" placeholder="e.g., Shift">
+                </div>
+                <div class="setting-row">
+                    <label>Assistant Reference Column</label>
+                    <input type="text" id="cfg-assistantRefColumn" placeholder="e.g., Assistant">
+                </div>
+                <div class="setting-row">
+                    <label>Status Column</label>
+                    <input type="text" id="cfg-statusColumn" placeholder="e.g., Status">
+                </div>
+            </div>
+
+            <div class="settings-group">
+                <div class="settings-group-title">Shifts Table Columns</div>
+                <div class="setting-row">
+                    <label>Display Column</label>
+                    <input type="text" id="cfg-shiftDisplayColumn" placeholder="e.g., Name">
+                </div>
+                <div class="setting-row">
+                    <label>Details Column (optional)</label>
+                    <input type="text" id="cfg-shiftDetailsColumn" placeholder="e.g., Date">
+                </div>
+            </div>
+
+            <div class="settings-group">
+                <div class="settings-group-title">Status Values</div>
+                <div class="setting-row">
+                    <label>Available Value</label>
+                    <input type="text" id="cfg-availableValue" placeholder="e.g., Available">
+                </div>
+                <div class="setting-row">
+                    <label>Unavailable Value</label>
+                    <input type="text" id="cfg-unavailableValue" placeholder="e.g., Unavailable">
+                </div>
+            </div>
+
+            <div class="settings-actions">
+                <button class="btn-save" onclick="saveSettings()">Save Settings</button>
+                <button class="btn-cancel" onclick="toggleSettings()">Cancel</button>
+            </div>
+        </div>
         
         <div id="assistant-info" class="assistant-info" style="display: none;">
             Setting availability for: <span id="assistant-name" class="assistant-name"></span>
@@ -179,7 +346,7 @@
                         <li>A <code>Status</code> column (text: "Available" or "Unavailable")</li>
                     </ul>
                 </li>
-                <li>Add this widget and configure columns in widget settings</li>
+                <li>Click <strong>⚙️ Settings</strong> above to configure the widget</li>
                 <li>Use "Select By" to link to your <code>Assistants</code> table</li>
                 <li>Grant "Full document access" in widget settings for write capability</li>
             </ol>
@@ -189,22 +356,23 @@
     <script>
         // Configuration
         let config = {
-            shiftsTable: null,
-            availabilityTable: null,
-            shiftRefColumn: null,
-            assistantRefColumn: null,
-            statusColumn: null,
-            shiftDisplayColumn: null,
-            shiftDetailsColumn: null,
+            shiftsTable: '',
+            availabilityTable: '',
+            shiftRefColumn: 'Shift',
+            assistantRefColumn: 'Assistant',
+            statusColumn: 'Status',
+            shiftDisplayColumn: 'Name',
+            shiftDetailsColumn: '',
             availableValue: 'Available',
             unavailableValue: 'Unavailable'
         };
 
         let currentAssistant = null;
         let shifts = [];
-        let availabilityMap = {}; // shiftId -> { recordId, status }
+        let availabilityMap = {};
         let isReady = false;
-        let hasWriteAccess = true; // Assume true, will be updated by onOptions
+        let hasWriteAccess = true;
+        let availableTables = [];
 
         function updateStatus(message, type = 'info') {
             const status = document.getElementById('status');
@@ -218,6 +386,61 @@
 
         function hideSetup() {
             document.getElementById('setup').style.display = 'none';
+        }
+
+        function toggleSettings() {
+            const panel = document.getElementById('settings-panel');
+            const isVisible = panel.classList.contains('visible');
+            
+            if (!isVisible) {
+                populateSettingsForm();
+            }
+            
+            panel.classList.toggle('visible');
+        }
+
+        function populateSettingsForm() {
+            // Populate table dropdowns
+            const shiftsSelect = document.getElementById('cfg-shiftsTable');
+            const availSelect = document.getElementById('cfg-availabilityTable');
+            
+            shiftsSelect.innerHTML = '<option value="">-- Select Table --</option>' + 
+                availableTables.map(t => `<option value="${t}" ${t === config.shiftsTable ? 'selected' : ''}>${t}</option>`).join('');
+            
+            availSelect.innerHTML = '<option value="">-- Select Table --</option>' + 
+                availableTables.map(t => `<option value="${t}" ${t === config.availabilityTable ? 'selected' : ''}>${t}</option>`).join('');
+            
+            // Populate other fields
+            document.getElementById('cfg-shiftRefColumn').value = config.shiftRefColumn || 'Shift';
+            document.getElementById('cfg-assistantRefColumn').value = config.assistantRefColumn || 'Assistant';
+            document.getElementById('cfg-statusColumn').value = config.statusColumn || 'Status';
+            document.getElementById('cfg-shiftDisplayColumn').value = config.shiftDisplayColumn || 'Name';
+            document.getElementById('cfg-shiftDetailsColumn').value = config.shiftDetailsColumn || '';
+            document.getElementById('cfg-availableValue').value = config.availableValue || 'Available';
+            document.getElementById('cfg-unavailableValue').value = config.unavailableValue || 'Unavailable';
+        }
+
+        async function saveSettings() {
+            config.shiftsTable = document.getElementById('cfg-shiftsTable').value;
+            config.availabilityTable = document.getElementById('cfg-availabilityTable').value;
+            config.shiftRefColumn = document.getElementById('cfg-shiftRefColumn').value || 'Shift';
+            config.assistantRefColumn = document.getElementById('cfg-assistantRefColumn').value || 'Assistant';
+            config.statusColumn = document.getElementById('cfg-statusColumn').value || 'Status';
+            config.shiftDisplayColumn = document.getElementById('cfg-shiftDisplayColumn').value || 'Name';
+            config.shiftDetailsColumn = document.getElementById('cfg-shiftDetailsColumn').value || '';
+            config.availableValue = document.getElementById('cfg-availableValue').value || 'Available';
+            config.unavailableValue = document.getElementById('cfg-unavailableValue').value || 'Unavailable';
+            
+            try {
+                await grist.widgetApi.setOptions(config);
+                updateStatus('Settings saved!', 'success');
+                toggleSettings();
+                hideSetup();
+                await refresh();
+            } catch (e) {
+                console.error('Error saving settings:', e);
+                updateStatus('Error saving settings: ' + e.message, 'error');
+            }
         }
 
         function escapeHtml(text) {
@@ -236,14 +459,6 @@
             } catch (e) {
                 console.error('Error loading config:', e);
                 return false;
-            }
-        }
-
-        async function saveConfig() {
-            try {
-                await grist.widgetApi.setOptions(config);
-            } catch (e) {
-                console.error('Error saving config:', e);
             }
         }
 
@@ -281,7 +496,6 @@
                     const refCol = config.assistantRefColumn || 'Assistant';
                     const assistantRef = table[refCol]?.[i];
                     
-                    // Handle both direct ID and reference format
                     const refId = typeof assistantRef === 'number' ? assistantRef : assistantRef;
                     
                     if (refId === assistantId) {
@@ -323,7 +537,6 @@
                 const statusCol = config.statusColumn || 'Status';
                 
                 if (existing) {
-                    // Update existing record
                     await grist.docApi.applyUserActions([
                         ['UpdateRecord', config.availabilityTable, existing.recordId, {
                             [statusCol]: newStatus
@@ -331,7 +544,6 @@
                     ]);
                     availabilityMap[shiftId].status = newStatus;
                 } else {
-                    // Create new record
                     const shiftCol = config.shiftRefColumn || 'Shift';
                     const assistantCol = config.assistantRefColumn || 'Assistant';
                     
@@ -343,7 +555,6 @@
                         }]
                     ]);
                     
-                    // Store the new record ID
                     if (result && result.retValues && result.retValues[0]) {
                         availabilityMap[shiftId] = {
                             recordId: result.retValues[0],
@@ -365,7 +576,7 @@
             const content = document.getElementById('content');
             
             if (shifts.length === 0) {
-                content.innerHTML = '<div class="empty-state">No shifts found</div>';
+                content.innerHTML = '<div class="empty-state">No shifts found. Check Settings to configure tables.</div>';
                 return;
             }
 
@@ -429,10 +640,14 @@
 
         async function init() {
             try {
-                // Check access level after ready
                 grist.onOptions(async (options, interaction) => {
                     hasWriteAccess = interaction?.accessLevel === 'full';
                     console.log('Access level:', interaction?.accessLevel, 'hasWriteAccess:', hasWriteAccess);
+                    
+                    if (options) {
+                        config = { ...config, ...options };
+                        await refresh();
+                    }
                 });
 
                 grist.ready({
@@ -440,53 +655,36 @@
                     allowSelectBy: true,
                     columns: [
                         { name: 'Name', title: 'Assistant Name', optional: true, type: 'Any' }
-                    ],
-                    onEditOptions: async () => {
-                        // Show configuration dialog
-                        const tables = await grist.docApi.listTables();
-                        
-                        const newConfig = {
-                            shiftsTable: prompt('Shifts table name:', config.shiftsTable || tables[0]),
-                            availabilityTable: prompt('Availability table name:', config.availabilityTable || ''),
-                            shiftRefColumn: prompt('Shift reference column in Availability:', config.shiftRefColumn || 'Shift'),
-                            assistantRefColumn: prompt('Assistant reference column in Availability:', config.assistantRefColumn || 'Assistant'),
-                            statusColumn: prompt('Status column in Availability:', config.statusColumn || 'Status'),
-                            shiftDisplayColumn: prompt('Display column in Shifts:', config.shiftDisplayColumn || 'Name'),
-                            shiftDetailsColumn: prompt('Details column in Shifts (optional):', config.shiftDetailsColumn || ''),
-                            availableValue: prompt('Value for "available":', config.availableValue || 'Available'),
-                            unavailableValue: prompt('Value for "unavailable":', config.unavailableValue || 'Unavailable')
-                        };
-                        
-                        config = { ...config, ...newConfig };
-                        await saveConfig();
-                        await refresh();
-                    }
+                    ]
                 });
 
                 isReady = true;
+
+                // Fetch available tables
+                try {
+                    availableTables = await grist.docApi.listTables();
+                } catch (e) {
+                    console.error('Error listing tables:', e);
+                    availableTables = [];
+                }
 
                 // Load saved configuration
                 const hasConfig = await loadConfig();
                 
                 if (!hasConfig) {
                     showSetup();
-                    updateStatus('Configure widget in settings (click gear icon)', 'warning');
+                    updateStatus('Click ⚙️ Settings to configure the widget', 'warning');
                     
                     // Try auto-detection
-                    try {
-                        const tables = await grist.docApi.listTables();
-                        const shiftsTable = tables.find(t => t.toLowerCase().includes('shift'));
-                        const availTable = tables.find(t => t.toLowerCase().includes('avail'));
-                        
-                        if (shiftsTable && availTable) {
-                            config.shiftsTable = shiftsTable;
-                            config.availabilityTable = availTable;
-                            await saveConfig();
-                            hideSetup();
-                            updateStatus('Auto-detected tables - verify in settings', 'info');
-                        }
-                    } catch (e) {
-                        console.log('Auto-detection failed:', e);
+                    const shiftsTable = availableTables.find(t => t.toLowerCase().includes('shift'));
+                    const availTable = availableTables.find(t => t.toLowerCase().includes('avail'));
+                    
+                    if (shiftsTable && availTable) {
+                        config.shiftsTable = shiftsTable;
+                        config.availabilityTable = availTable;
+                        await grist.widgetApi.setOptions(config);
+                        hideSetup();
+                        updateStatus('Auto-detected tables - verify in ⚙️ Settings', 'info');
                     }
                 } else {
                     hideSetup();
@@ -520,8 +718,10 @@
             }
         }
 
-        // Expose toggle function globally
+        // Expose functions globally
         window.toggleAvailability = toggleAvailability;
+        window.toggleSettings = toggleSettings;
+        window.saveSettings = saveSettings;
 
         // Start
         if (document.readyState === 'loading') {
