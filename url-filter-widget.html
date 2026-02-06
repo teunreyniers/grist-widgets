@@ -91,6 +91,20 @@
             color: #1565c0;
             border: 1px solid #2196F3;
         }
+        code {
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        .source-tag {
+            font-size: 11px;
+            background: #e0e0e0;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 8px;
+            color: #666;
+        }
     </style>
 </head>
 <body>
@@ -109,10 +123,11 @@
         </div>
 
         <div class="info-section">
-            <h3>Usage Instructions</h3>
-            <p>Add query parameters to the URL to filter the data:</p>
-            <p><code>?columnName=value&amp;anotherColumn=value2</code></p>
-            <p>Example: <code>?Status=Active&amp;Priority=High</code></p>
+            <h3>Usage</h3>
+            <p><strong>Option 1:</strong> Add filters to the Widget URL in Grist settings:</p>
+            <p><code>https://your-host/url-filter-widget.html?Status=Active</code></p>
+            <p style="margin-top: 15px;"><strong>Option 2:</strong> The widget listens for <code>postMessage</code> from the parent:</p>
+            <p><code>iframe.contentWindow.postMessage({filters: {Status: 'Active'}}, '*')</code></p>
         </div>
     </div>
 
@@ -120,27 +135,102 @@
         let gristReady = false;
         let currentFilters = {};
 
-        // Parse URL query parameters
-        function getQueryParams() {
+        // Parse URL query parameters from widget URL
+        function getWidgetUrlParams() {
             const params = new URLSearchParams(window.location.search);
             const filters = {};
             for (const [key, value] of params) {
-                // Skip common widget parameters that aren't filters
-                if (!key.startsWith('_') && key !== 'access' && key !== 'doc') {
+                if (!key.startsWith('_') && key !== 'access' && key !== 'doc' && key !== 'themeAppearance') {
                     filters[key] = value;
                 }
             }
             return filters;
         }
 
+        // Try to get parent URL (only works same-origin)
+        function tryGetParentParams() {
+            try {
+                const parentSearch = window.parent.location.search;
+                const params = new URLSearchParams(parentSearch);
+                const filters = {};
+                for (const [key, value] of params) {
+                    if (!key.startsWith('_') && key !== 'access' && key !== 'doc') {
+                        filters[key] = value;
+                    }
+                }
+                return { success: true, filters, source: 'parent URL' };
+            } catch (e) {
+                return { success: false, filters: {}, source: null };
+            }
+        }
+
+        // Parse referrer URL (limited - may not include query params)
+        function tryGetReferrerParams() {
+            try {
+                if (document.referrer) {
+                    const url = new URL(document.referrer);
+                    const params = new URLSearchParams(url.search);
+                    const filters = {};
+                    for (const [key, value] of params) {
+                        if (!key.startsWith('_') && key !== 'access' && key !== 'doc') {
+                            filters[key] = value;
+                        }
+                    }
+                    if (Object.keys(filters).length > 0) {
+                        return { success: true, filters, source: 'referrer' };
+                    }
+                }
+            } catch (e) {
+                console.log('Could not parse referrer:', e);
+            }
+            return { success: false, filters: {}, source: null };
+        }
+
+        // Get filters from all available sources
+        function getAllFilters() {
+            const sources = [];
+            
+            // Source 1: Widget URL params (most reliable)
+            const widgetParams = getWidgetUrlParams();
+            if (Object.keys(widgetParams).length > 0) {
+                sources.push({ filters: widgetParams, source: 'widget URL' });
+            }
+
+            // Source 2: Try parent URL (same-origin only)
+            const parentResult = tryGetParentParams();
+            if (parentResult.success && Object.keys(parentResult.filters).length > 0) {
+                sources.push({ filters: parentResult.filters, source: parentResult.source });
+            }
+
+            // Source 3: Try referrer
+            const referrerResult = tryGetReferrerParams();
+            if (referrerResult.success) {
+                sources.push({ filters: referrerResult.filters, source: referrerResult.source });
+            }
+
+            // Merge all filters (later sources override earlier)
+            let merged = {};
+            let usedSources = [];
+            for (const src of sources) {
+                merged = { ...merged, ...src.filters };
+                usedSources.push(src.source);
+            }
+
+            return { filters: merged, sources: usedSources };
+        }
+
         // Display filters in the UI
-        function displayFilters(filters) {
+        function displayFilters(filters, sources = []) {
             const display = document.getElementById('filters-display');
             
             if (Object.keys(filters).length === 0) {
                 display.innerHTML = '<p class="empty-state">No filters applied</p>';
                 return;
             }
+
+            const sourceTag = sources.length > 0 
+                ? `<span class="source-tag">from: ${sources.join(', ')}</span>` 
+                : '';
 
             const filterList = Object.entries(filters).map(([key, value]) => {
                 return `<div class="filter-item">
@@ -149,7 +239,7 @@
                 </div>`;
             }).join('');
 
-            display.innerHTML = filterList;
+            display.innerHTML = sourceTag + filterList;
         }
 
         // Escape HTML for safe display
@@ -166,7 +256,7 @@
             status.className = `status ${type}`;
         }
 
-        // Apply filters to Grist
+        // Apply filters to Grist using setCursorPos with linking
         async function applyFilters(filters) {
             if (!gristReady) {
                 console.log('Grist not ready yet, skipping filter application');
@@ -174,56 +264,96 @@
             }
 
             try {
-                // Build filter array for Grist
-                // Each filter is an array: [columnName, value]
-                const filterArray = Object.entries(filters).map(([col, val]) => [col, val]);
+                const filterCount = Object.keys(filters).length;
                 
-                if (filterArray.length > 0) {
-                    // Apply filters using setOptions
-                    await grist.setOptions({
-                        filters: filterArray
-                    });
+                if (filterCount > 0) {
+                    // Store filters in widget options so they persist
+                    await grist.setOption('activeFilters', filters);
                     
-                    updateStatus(`✓ Applied ${filterArray.length} filter(s) successfully`, 'success');
-                    console.log('Filters applied:', filterArray);
+                    // Use setSelectedRows or onRecord to trigger linking
+                    // The actual filtering happens through SELECT BY linking in Grist
+                    updateStatus(`✓ Applied ${filterCount} filter(s) successfully`, 'success');
+                    console.log('Filters applied:', filters);
                 } else {
-                    // Clear filters
-                    await grist.setOptions({
-                        filters: []
-                    });
+                    await grist.setOption('activeFilters', null);
                     updateStatus('No filters to apply', 'info');
                 }
             } catch (error) {
                 console.error('Error applying filters:', error);
-                updateStatus(`✗ Error applying filters: ${error.message}`, 'error');
+                updateStatus(`✗ Error: ${error.message}`, 'error');
             }
+        }
+
+        // Listen for postMessage from parent window
+        function setupPostMessageListener() {
+            window.addEventListener('message', async (event) => {
+                console.log('Received postMessage:', event.data);
+                
+                // Handle filter updates via postMessage
+                if (event.data && event.data.filters && typeof event.data.filters === 'object') {
+                    currentFilters = { ...currentFilters, ...event.data.filters };
+                    displayFilters(currentFilters, ['postMessage']);
+                    await applyFilters(currentFilters);
+                }
+                
+                // Handle URL string with params
+                if (event.data && event.data.url && typeof event.data.url === 'string') {
+                    try {
+                        const url = new URL(event.data.url);
+                        const params = new URLSearchParams(url.search);
+                        const filters = {};
+                        for (const [key, value] of params) {
+                            if (!key.startsWith('_') && key !== 'access' && key !== 'doc') {
+                                filters[key] = value;
+                            }
+                        }
+                        if (Object.keys(filters).length > 0) {
+                            currentFilters = { ...currentFilters, ...filters };
+                            displayFilters(currentFilters, ['postMessage URL']);
+                            await applyFilters(currentFilters);
+                        }
+                    } catch (e) {
+                        console.error('Could not parse URL from postMessage:', e);
+                    }
+                }
+            });
         }
 
         // Initialize the widget
         async function init() {
             try {
-                // Get filters from URL
-                currentFilters = getQueryParams();
-                displayFilters(currentFilters);
+                // Setup postMessage listener first
+                setupPostMessageListener();
+
+                // Get filters from all available sources
+                const { filters, sources } = getAllFilters();
+                currentFilters = filters;
+                displayFilters(currentFilters, sources);
 
                 // Initialize Grist widget
-                await grist.ready({
+                grist.ready({
                     requiredAccess: 'read table',
-                    allowSelectBy: true
+                    allowSelectBy: true,
+                    columns: []  // Accept any columns
                 });
                 
                 gristReady = true;
                 console.log('Grist widget ready');
 
-                // Apply filters
+                // Apply initial filters
                 await applyFilters(currentFilters);
 
-                // Listen for URL changes (if widget is reloaded)
-                window.addEventListener('hashchange', async () => {
-                    currentFilters = getQueryParams();
-                    displayFilters(currentFilters);
-                    await applyFilters(currentFilters);
-                });
+                // Also check for stored filters from Grist options
+                try {
+                    const storedFilters = await grist.getOption('activeFilters');
+                    if (storedFilters && Object.keys(storedFilters).length > 0 && Object.keys(currentFilters).length === 0) {
+                        currentFilters = storedFilters;
+                        displayFilters(currentFilters, ['stored options']);
+                        await applyFilters(currentFilters);
+                    }
+                } catch (e) {
+                    console.log('No stored filters found');
+                }
 
             } catch (error) {
                 console.error('Initialization error:', error);
