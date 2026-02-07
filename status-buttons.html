@@ -135,10 +135,7 @@
     }
 
     function getAvailableStatuses() {
-      if (statusChoices.length > 0) {
-        return statusChoices;
-      }
-      return [...new Set(records.map(r => r.Status).filter(Boolean))];
+      return statusChoices;
     }
 
     function render() {
