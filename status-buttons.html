@@ -383,6 +383,33 @@
     async function fetchStatusChoices() {
       if (!statusColumnId || !tableId) return;
 
+      // Try using REST API with access token (works with read/write access)
+      try {
+        const tokenInfo = await grist.getAccessToken({ readOnly: true });
+        const response = await fetch(`${tokenInfo.baseUrl}/tables/${tableId}/columns/${statusColumnId}`, {
+          headers: { 'Authorization': `Bearer ${tokenInfo.token}` }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          const widgetOptions = data.widgetOptions;
+          if (widgetOptions) {
+            const options = typeof widgetOptions === 'string' 
+              ? JSON.parse(widgetOptions) 
+              : widgetOptions;
+            if (options.choices && Array.isArray(options.choices)) {
+              statusChoices = options.choices;
+              choiceStyles = options.choiceOptions || {};
+              render();
+              return;
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Failed to fetch via API:', e);
+      }
+
+      // Fallback to metadata tables (requires full access)
       try {
         const tables = await grist.docApi.fetchTable('_grist_Tables');
         const columns = await grist.docApi.fetchTable('_grist_Tables_column');
