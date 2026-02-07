@@ -76,6 +76,7 @@
   <script>
     let records = [];
     let statusChoices = [];
+    let tableId = null;
     let statusColumnId = null;
 
     grist.ready({
@@ -86,14 +87,18 @@
       requiredAccess: 'full'
     });
 
-    grist.onRecords((data) => {
+    grist.onRecords((data, mappings) => {
       records = grist.mapColumnNames(data) || [];
+      if (mappings && mappings.Status) {
+        statusColumnId = mappings.Status;
+        fetchStatusChoices();
+      }
       render();
     });
 
-    grist.onOptions((options) => {
-      if (options && options.mappings) {
-        statusColumnId = options.mappings.Status || null;
+    grist.on('message', (msg) => {
+      if (msg.tableId) {
+        tableId = msg.tableId;
         if (statusColumnId) {
           fetchStatusChoices();
         }
@@ -101,12 +106,18 @@
     });
 
     async function fetchStatusChoices() {
-      if (!statusColumnId) return;
+      if (!statusColumnId || !tableId) return;
 
       try {
+        const tables = await grist.docApi.fetchTable('_grist_Tables');
         const columns = await grist.docApi.fetchTable('_grist_Tables_column');
 
-        const colIndex = columns.colId.indexOf(statusColumnId);
+        const tableRef = tables.id[tables.tableId.indexOf(tableId)];
+        if (!tableRef) return;
+
+        const colIndex = columns.id.findIndex((id, i) => 
+          columns.parentId[i] === tableRef && columns.colId[i] === statusColumnId
+        );
         if (colIndex === -1) return;
 
         const colType = columns.type[colIndex];
