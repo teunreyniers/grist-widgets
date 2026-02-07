@@ -699,6 +699,8 @@
                     }
                 }
                 
+                // Rebuild map and re-render to ensure consistency
+                buildAvailabilityMap();
                 renderShifts();
                 updateStatus(`Set to: ${newStatus}`, 'success');
                 
@@ -725,7 +727,11 @@
             const content = document.getElementById('content');
             
             if (shifts.length === 0) {
-                content.innerHTML = '<div class="empty-state">No shifts found. Make sure column mappings are configured.</div>';
+                if (currentAssistant) {
+                    content.innerHTML = '<div class="empty-state">No shifts found. Make sure column mappings are configured.</div>';
+                } else {
+                    content.innerHTML = '<div class="empty-state">Select an assistant to set availability</div>';
+                }
                 return;
             }
 
@@ -734,6 +740,11 @@
 
             // Use status choices from Choice column configuration
             const availableStatuses = statusChoices;
+            
+            if (availableStatuses.length === 0) {
+                content.innerHTML = '<div class="empty-state">No status choices configured. Make sure the Status column is a Choice type.</div>';
+                return;
+            }
 
             const html = `<div class="shifts-grid">
                 ${shifts.map(shift => {
@@ -777,18 +788,17 @@
         }
 
         async function refresh() {
+            buildAvailabilityMap();
+            renderShifts();
+            
             if (!currentAssistant) {
                 document.getElementById('assistant-info').style.display = 'none';
                 updateStatus('Select an assistant to set availability', 'info');
-                renderShifts();
                 return;
             }
 
             document.getElementById('assistant-info').style.display = 'block';
-            
-            buildAvailabilityMap();
-            renderShifts();
-            updateStatus(`Showing ${shifts.length} shift(s)`, 'success');
+            updateStatus(`Showing ${shifts.length} shift(s) for ${currentAssistant.name}`, 'success');
         }
 
         async function init() {
