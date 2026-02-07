@@ -15,6 +15,39 @@
       padding: 16px;
       background: #fff;
     }
+    .week-nav {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 12px;
+      margin-bottom: 16px;
+      border-bottom: 2px solid #e0e0e0;
+    }
+    .week-nav button {
+      padding: 8px 16px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background: #f5f5f5;
+      cursor: pointer;
+      font-size: 16px;
+      transition: all 0.15s;
+    }
+    .week-nav button:hover {
+      background: #e0e0e0;
+      border-color: #bbb;
+    }
+    .week-label {
+      font-weight: 600;
+      font-size: 15px;
+      color: #333;
+      min-width: 200px;
+      text-align: center;
+    }
+    .today-btn {
+      font-size: 13px !important;
+      padding: 6px 12px !important;
+    }
     .record {
       display: flex;
       align-items: center;
@@ -79,11 +112,60 @@
     let choiceStyles = {};
     let tableId = null;
     let statusColumnId = null;
+    let currentWeekStart = getWeekStart(new Date());
+
+    function getWeekStart(date) {
+      const d = new Date(date);
+      const day = d.getDay();
+      const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday as start
+      d.setDate(diff);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    }
+
+    function getWeekEnd(weekStart) {
+      const end = new Date(weekStart);
+      end.setDate(end.getDate() + 6);
+      end.setHours(23, 59, 59, 999);
+      return end;
+    }
+
+    function formatWeekLabel(weekStart) {
+      const weekEnd = getWeekEnd(weekStart);
+      const opts = { month: 'short', day: 'numeric' };
+      const startStr = weekStart.toLocaleDateString('en-US', opts);
+      const endStr = weekEnd.toLocaleDateString('en-US', { ...opts, year: 'numeric' });
+      return `${startStr} – ${endStr}`;
+    }
+
+    function prevWeek() {
+      currentWeekStart.setDate(currentWeekStart.getDate() - 7);
+      render();
+    }
+
+    function nextWeek() {
+      currentWeekStart.setDate(currentWeekStart.getDate() + 7);
+      render();
+    }
+
+    function goToToday() {
+      currentWeekStart = getWeekStart(new Date());
+      render();
+    }
+
+    function isInCurrentWeek(dateValue) {
+      if (!dateValue) return false;
+      // Grist dates are Unix timestamps in seconds
+      const recordDate = new Date(dateValue * 1000);
+      const weekEnd = getWeekEnd(currentWeekStart);
+      return recordDate >= currentWeekStart && recordDate <= weekEnd;
+    }
 
     grist.ready({
       columns: [
         { name: 'Title', title: 'Title', type: 'Text' },
-        { name: 'Status', title: 'Status', type: 'Choice' }
+        { name: 'Status', title: 'Status', type: 'Choice' },
+        { name: 'Date', title: 'Date', type: 'Date' }
       ],
       requiredAccess: 'full'
     });
@@ -154,14 +236,25 @@
     function render() {
       const app = document.getElementById('app');
 
-      if (records.length === 0) {
-        app.innerHTML = '<div class="no-records">No records found.</div>';
+      const filteredRecords = records.filter(r => isInCurrentWeek(r.Date));
+
+      const weekNav = `
+        <div class="week-nav">
+          <button onclick="prevWeek()">← Prev</button>
+          <span class="week-label">${formatWeekLabel(currentWeekStart)}</span>
+          <button onclick="nextWeek()">Next →</button>
+          <button class="today-btn" onclick="goToToday()">Today</button>
+        </div>
+      `;
+
+      if (filteredRecords.length === 0) {
+        app.innerHTML = weekNav + '<div class="no-records">No records for this week.</div>';
         return;
       }
 
       const allStatuses = getAvailableStatuses();
 
-      app.innerHTML = records.map(record => {
+      app.innerHTML = weekNav + filteredRecords.map(record => {
         const title = record.Title || '(no title)';
         const currentStatus = record.Status || '';
 
