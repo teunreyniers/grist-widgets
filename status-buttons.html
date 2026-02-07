@@ -75,7 +75,7 @@
 
   <script>
     let records = [];
-    let mappings = {};
+    let columnMappings = null;
     let statusChoices = [];
 
     grist.ready({
@@ -86,61 +86,62 @@
       requiredAccess: 'full'
     });
 
-    grist.onRecords((data, mappedData) => {
-      records = data;
-      mappings = grist.mapColumnNames(data) ? {} : null;
-      if (mappedData && mappedData.length > 0) {
-        records = mappedData;
+    grist.onRecords((data, mappings) => {
+      columnMappings = mappings;
+      const mapped = grist.mapColumnNames(data);
+      records = mapped || [];
+      if (mapped) {
+        fetchStatusChoices();
       }
       render();
     });
 
-    grist.on('message', async (msg) => {
-      if (msg.tableId) {
-        try {
-          const tables = await grist.docApi.fetchTable(msg.tableId);
-          // Try to get column info for choices
-        } catch (e) {}
-      }
-    });
+    async function fetchStatusChoices() {
+      if (!columnMappings || !columnMappings.Status) return;
 
-    // Fetch column options when mappings are set
-    grist.onOptions((options) => {
-      if (options && options.choices) {
-        statusChoices = options.choices;
-        render();
-      }
-    });
-
-    async function fetchChoices() {
       try {
-        const tableId = await grist.getTable();
-        if (tableId) {
-          const cols = await grist.docApi.listColumns(tableId.tableId);
-          const statusCol = cols.find(c => c.id === 'Status' || c.label === 'Status');
-          if (statusCol && statusCol.type.startsWith('Choice')) {
-            // Parse choices from widget options
-          }
+        const tableId = await grist.selectedTable.getTableId();
+        const columns = await grist.docApi.fetchTable('_grist_Tables_column');
+
+        const colIndex = columns.colId.indexOf(columnMappings.Status);
+        if (colIndex === -1) return;
+
+        const colType = columns.type[colIndex];
+        if (!colType || !colType.startsWith('Choice')) return;
+
+        const widgetOptions = columns.widgetOptions[colIndex];
+        if (!widgetOptions) return;
+
+        const options = JSON.parse(widgetOptions);
+        if (options.choices && Array.isArray(options.choices)) {
+          statusChoices = options.choices;
+          render();
         }
-      } catch (e) {}
+      } catch (e) {
+        console.error('Failed to fetch status choices:', e);
+      }
     }
 
     async function changeStatus(rowId, newStatus) {
       try {
-        const table = await grist.getTable();
+        const table = await grist.selectedTable;
         await table.update({ id: rowId, fields: { Status: newStatus } });
       } catch (e) {
         console.error('Failed to update status:', e);
       }
     }
 
+    function getAvailableStatuses() {
+      if (statusChoices.length > 0) {
+        return statusChoices;
+      }
+      return [...new Set(records.map(r => r.Status).filter(Boolean))];
+    }
+
     function render() {
       const app = document.getElementById('app');
 
-      // Check if we have mapped columns
-      const mapped = records.length > 0 && records[0].Title !== undefined;
-
-      if (!mapped) {
+      if (!columnMappings) {
         app.innerHTML = '<div class="config-message">Please map the Title and Status columns in widget settings.</div>';
         return;
       }
@@ -150,8 +151,7 @@
         return;
       }
 
-      // Extract all unique status values from records
-      const allStatuses = [...new Set(records.map(r => r.Status).filter(s => s))];
+      const allStatuses = getAvailableStatuses();
 
       app.innerHTML = records.map(record => {
         const title = record.Title || '(no title)';
