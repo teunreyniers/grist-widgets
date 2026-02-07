@@ -93,40 +93,34 @@
             color: #666;
         }
 
-        .toggle-btn {
-            padding: 10px 20px;
-            border: none;
+        .status-buttons {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .status-btn {
+            padding: 8px 16px;
+            border: 2px solid transparent;
             border-radius: 6px;
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 500;
             cursor: pointer;
             transition: all 0.2s ease;
-            min-width: 120px;
+            background: #e9ecef;
+            color: #495057;
         }
-        .toggle-btn:disabled {
+        .status-btn:disabled {
             opacity: 0.6;
             cursor: not-allowed;
         }
-        .toggle-btn.available {
-            background: #28a745;
+        .status-btn:hover:not(:disabled):not(.active) {
+            background: #dee2e6;
+        }
+        .status-btn.active {
             color: white;
-        }
-        .toggle-btn.available:hover:not(:disabled) {
-            background: #218838;
-        }
-        .toggle-btn.unavailable {
-            background: #dc3545;
-            color: white;
-        }
-        .toggle-btn.unavailable:hover:not(:disabled) {
-            background: #c82333;
-        }
-        .toggle-btn.unknown {
-            background: #6c757d;
-            color: white;
-        }
-        .toggle-btn.unknown:hover:not(:disabled) {
-            background: #5a6268;
+            font-weight: 600;
         }
 
         .loading {
@@ -282,9 +276,10 @@
             <h3>Display Settings</h3>
             
             <div id="derived-info" class="derived-info" style="display: none;">
-                <strong>Auto-detected tables:</strong><br>
-                Shifts: <span id="derived-shifts">-</span><br>
-                Assistants: <span id="derived-assistants">-</span>
+                <strong>Auto-detected:</strong><br>
+                Shifts table: <span id="derived-shifts">-</span><br>
+                Assistants table: <span id="derived-assistants">-</span><br>
+                Status choices: <span id="derived-choices">-</span>
             </div>
 
             <div class="settings-group">
@@ -296,18 +291,6 @@
                 <div class="setting-row">
                     <label>Details Column (optional)</label>
                     <select id="cfg-shiftDetailsColumn"></select>
-                </div>
-            </div>
-
-            <div class="settings-group">
-                <div class="settings-group-title">Status Values</div>
-                <div class="setting-row">
-                    <label>Available Value</label>
-                    <input type="text" id="cfg-availableValue" placeholder="e.g., Available">
-                </div>
-                <div class="setting-row">
-                    <label>Unavailable Value</label>
-                    <input type="text" id="cfg-unavailableValue" placeholder="e.g., Unavailable">
                 </div>
             </div>
 
@@ -333,7 +316,7 @@
                     <ul>
                         <li>A reference column to <code>Shifts</code></li>
                         <li>A reference column to <code>Assistants</code></li>
-                        <li>A <code>Status</code> column (text: "Available" or "Unavailable")</li>
+                        <li>A <code>Status</code> column (Choice type recommended)</li>
                     </ul>
                 </li>
                 <li>Add this widget and set <strong>"Select By"</strong> to the Assistants table</li>
@@ -354,15 +337,17 @@
         // Configuration - only display preferences now
         let config = {
             shiftDisplayColumn: 'Name',
-            shiftDetailsColumn: '',
-            availableValue: 'Available',
-            unavailableValue: 'Unavailable'
+            shiftDetailsColumn: ''
         };
 
         // Derived from Ref column types
         let shiftsTable = null;
         let assistantsTable = null;
         let availabilityTableId = null;
+
+        // Status choices (auto-detected from Choice column)
+        let statusChoices = [];
+        let statusColors = {};
 
         // Column mappings from Grist widget settings
         let mappedColumns = {
@@ -378,6 +363,18 @@
         let availabilityMap = {};
         let shiftsColumns = [];
         let hasWriteAccess = true;
+
+        // Default colors for statuses
+        const defaultColors = [
+            '#28a745', // green
+            '#dc3545', // red
+            '#ffc107', // yellow
+            '#17a2b8', // cyan
+            '#6f42c1', // purple
+            '#fd7e14', // orange
+            '#20c997', // teal
+            '#e83e8c', // pink
+        ];
 
         function updateStatus(message, type = 'info') {
             const status = document.getElementById('status');
@@ -405,12 +402,15 @@
         }
 
         async function populateSettingsForm() {
-            // Show derived tables info
+            // Show derived info
             const derivedInfo = document.getElementById('derived-info');
-            if (shiftsTable || assistantsTable) {
+            if (shiftsTable || assistantsTable || statusChoices.length > 0) {
                 derivedInfo.style.display = 'block';
                 document.getElementById('derived-shifts').textContent = shiftsTable || 'Not detected';
                 document.getElementById('derived-assistants').textContent = assistantsTable || 'Not detected';
+                document.getElementById('derived-choices').textContent = statusChoices.length > 0 
+                    ? statusChoices.join(', ') 
+                    : 'Not a Choice column';
             }
 
             // Populate shift column dropdowns
@@ -425,17 +425,11 @@
                 shiftsColumns.map(c => 
                     `<option value="${c}" ${c === config.shiftDetailsColumn ? 'selected' : ''}>${c}</option>`
                 ).join('');
-            
-            // Populate other fields
-            document.getElementById('cfg-availableValue').value = config.availableValue || 'Available';
-            document.getElementById('cfg-unavailableValue').value = config.unavailableValue || 'Unavailable';
         }
 
         async function saveSettings() {
             config.shiftDisplayColumn = document.getElementById('cfg-shiftDisplayColumn').value || 'Name';
             config.shiftDetailsColumn = document.getElementById('cfg-shiftDetailsColumn').value || '';
-            config.availableValue = document.getElementById('cfg-availableValue').value || 'Available';
-            config.unavailableValue = document.getElementById('cfg-unavailableValue').value || 'Unavailable';
             
             try {
                 await grist.widgetApi.setOptions(config);
@@ -475,7 +469,6 @@
         // Fetch column metadata from Grist's internal tables
         async function fetchColumnMetadata() {
             try {
-                // Fetch internal tables for schema info
                 const tablesData = await grist.docApi.fetchTable('_grist_Tables');
                 const columnsData = await grist.docApi.fetchTable('_grist_Tables_column');
                 
@@ -485,18 +478,22 @@
                     tableIdToName[tablesData.id[i]] = tablesData.tableId[i];
                 }
                 
-                // Find the availability table's columns and their types
+                // Build column info with types and widgetOptions
                 const columnInfo = {};
                 for (let i = 0; i < columnsData.id.length; i++) {
                     const tableId = columnsData.parentId[i];
                     const tableName = tableIdToName[tableId];
                     const colId = columnsData.colId[i];
                     const colType = columnsData.type[i];
+                    const widgetOptions = columnsData.widgetOptions?.[i];
                     
                     if (!columnInfo[tableName]) {
                         columnInfo[tableName] = {};
                     }
-                    columnInfo[tableName][colId] = colType;
+                    columnInfo[tableName][colId] = {
+                        type: colType,
+                        widgetOptions: widgetOptions
+                    };
                 }
                 
                 return columnInfo;
@@ -506,8 +503,36 @@
             }
         }
 
-        // Derive table names from mapped Ref columns
-        async function deriveTablesFromMappings(tableName) {
+        // Parse Choice options from widgetOptions
+        function parseChoiceOptions(widgetOptions) {
+            if (!widgetOptions) return { choices: [], colors: {} };
+            
+            try {
+                const options = typeof widgetOptions === 'string' 
+                    ? JSON.parse(widgetOptions) 
+                    : widgetOptions;
+                
+                const choices = options.choices || [];
+                const colors = {};
+                
+                // Extract colors from choiceOptions if available
+                if (options.choiceOptions) {
+                    for (const choice of choices) {
+                        if (options.choiceOptions[choice]?.fillColor) {
+                            colors[choice] = options.choiceOptions[choice].fillColor;
+                        }
+                    }
+                }
+                
+                return { choices, colors };
+            } catch (e) {
+                console.error('Error parsing choice options:', e);
+                return { choices: [], colors: {} };
+            }
+        }
+
+        // Derive table names and status choices from column metadata
+        async function deriveFromMetadata(tableName) {
             const metadata = await fetchColumnMetadata();
             if (!metadata || !metadata[tableName]) {
                 console.log('Could not fetch metadata for table:', tableName);
@@ -519,16 +544,38 @@
             
             // Get the Shift reference column type
             if (mappedColumns.Shift && tableColumns[mappedColumns.Shift]) {
-                const shiftRefType = tableColumns[mappedColumns.Shift];
-                shiftsTable = parseRefTable(shiftRefType);
-                console.log('Derived shifts table:', shiftsTable, 'from', shiftRefType);
+                const shiftColInfo = tableColumns[mappedColumns.Shift];
+                shiftsTable = parseRefTable(shiftColInfo.type);
+                console.log('Derived shifts table:', shiftsTable);
             }
             
             // Get the Assistant reference column type
             if (mappedColumns.Assistant && tableColumns[mappedColumns.Assistant]) {
-                const assistantRefType = tableColumns[mappedColumns.Assistant];
-                assistantsTable = parseRefTable(assistantRefType);
-                console.log('Derived assistants table:', assistantsTable, 'from', assistantRefType);
+                const assistantColInfo = tableColumns[mappedColumns.Assistant];
+                assistantsTable = parseRefTable(assistantColInfo.type);
+                console.log('Derived assistants table:', assistantsTable);
+            }
+            
+            // Get status choices if it's a Choice column
+            if (mappedColumns.Status && tableColumns[mappedColumns.Status]) {
+                const statusColInfo = tableColumns[mappedColumns.Status];
+                console.log('Status column info:', statusColInfo);
+                
+                if (statusColInfo.type === 'Choice') {
+                    const { choices, colors } = parseChoiceOptions(statusColInfo.widgetOptions);
+                    statusChoices = choices;
+                    statusColors = colors;
+                    
+                    // Assign default colors to choices without colors
+                    statusChoices.forEach((choice, index) => {
+                        if (!statusColors[choice]) {
+                            statusColors[choice] = defaultColors[index % defaultColors.length];
+                        }
+                    });
+                    
+                    console.log('Derived status choices:', statusChoices);
+                    console.log('Status colors:', statusColors);
+                }
             }
             
             return shiftsTable && assistantsTable;
@@ -560,7 +607,6 @@
         }
 
         function buildAvailabilityMap() {
-            // Build map from availability records for current assistant
             availabilityMap = {};
             
             if (!currentAssistant || !mappedColumns.Shift || !mappedColumns.Status) {
@@ -570,7 +616,6 @@
             for (const record of availabilityRecords) {
                 const assistantRef = record[mappedColumns.Assistant];
                 
-                // Check if this record is for the current assistant
                 if (assistantRef === currentAssistant.id) {
                     const shiftRef = record[mappedColumns.Shift];
                     availabilityMap[shiftRef] = {
@@ -581,7 +626,7 @@
             }
         }
 
-        async function toggleAvailability(shiftId, currentStatus) {
+        async function setAvailability(shiftId, newStatus) {
             if (!hasWriteAccess) {
                 updateStatus('No write access - enable "Full document access" in widget settings', 'error');
                 return;
@@ -597,14 +642,11 @@
                 return;
             }
 
-            const newStatus = currentStatus === config.availableValue 
-                ? config.unavailableValue 
-                : config.availableValue;
-
             try {
                 const existing = availabilityMap[shiftId];
                 
                 if (existing) {
+                    // Update existing record
                     await grist.docApi.applyUserActions([
                         ['UpdateRecord', availabilityTableId, existing.recordId, {
                             [mappedColumns.Status]: newStatus
@@ -612,10 +654,10 @@
                     ]);
                     availabilityMap[shiftId].status = newStatus;
                     
-                    // Update local record
                     const rec = availabilityRecords.find(r => r.id === existing.recordId);
                     if (rec) rec[mappedColumns.Status] = newStatus;
                 } else {
+                    // Create new record
                     const result = await grist.docApi.applyUserActions([
                         ['AddRecord', availabilityTableId, null, {
                             [mappedColumns.Shift]: shiftId,
@@ -631,7 +673,6 @@
                             status: newStatus
                         };
                         
-                        // Add to local records
                         availabilityRecords.push({
                             id: newRecordId,
                             [mappedColumns.Shift]: shiftId,
@@ -642,12 +683,25 @@
                 }
                 
                 renderShifts();
-                updateStatus(`Updated: ${newStatus}`, 'success');
+                updateStatus(`Set to: ${newStatus}`, 'success');
                 
             } catch (e) {
-                console.error('Error toggling availability:', e);
+                console.error('Error setting availability:', e);
                 updateStatus(`Error: ${e.message}`, 'error');
             }
+        }
+
+        function getContrastColor(hexColor) {
+            // Convert hex to RGB
+            const hex = hexColor.replace('#', '');
+            const r = parseInt(hex.substr(0, 2), 16);
+            const g = parseInt(hex.substr(2, 2), 16);
+            const b = parseInt(hex.substr(4, 2), 16);
+            
+            // Calculate luminance
+            const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+            
+            return luminance > 0.5 ? '#000000' : '#ffffff';
         }
 
         function renderShifts() {
@@ -661,37 +715,45 @@
             const displayCol = config.shiftDisplayColumn || 'Name';
             const detailsCol = config.shiftDetailsColumn;
 
+            // Determine which status options to show
+            const availableStatuses = statusChoices.length > 0 
+                ? statusChoices 
+                : ['Available', 'Unavailable']; // Fallback for non-Choice columns
+
             const html = `<div class="shifts-grid">
                 ${shifts.map(shift => {
                     const availability = availabilityMap[shift.id];
-                    const status = availability?.status;
-                    const isAvailable = status === config.availableValue;
-                    const isUnavailable = status === config.unavailableValue;
-                    
-                    let btnClass = 'unknown';
-                    let btnText = 'Set Availability';
-                    
-                    if (isAvailable) {
-                        btnClass = 'available';
-                        btnText = '✓ Available';
-                    } else if (isUnavailable) {
-                        btnClass = 'unavailable';
-                        btnText = '✗ Unavailable';
-                    }
+                    const currentStatus = availability?.status || null;
 
                     const shiftName = shift[displayCol] || `Shift ${shift.id}`;
                     const shiftDetails = detailsCol && shift[detailsCol] ? shift[detailsCol] : '';
+
+                    // Generate buttons for each status
+                    const statusButtonsHtml = availableStatuses.map(status => {
+                        const isActive = currentStatus === status;
+                        const color = statusColors[status] || '#6c757d';
+                        const textColor = getContrastColor(color);
+                        
+                        const style = isActive 
+                            ? `background: ${color}; color: ${textColor}; border-color: ${color};`
+                            : '';
+                        
+                        return `<button class="status-btn ${isActive ? 'active' : ''}" 
+                                style="${style}"
+                                onclick="setAvailability(${shift.id}, '${escapeHtml(status)}')"
+                                ${!currentAssistant ? 'disabled' : ''}>
+                            ${isActive ? '✓ ' : ''}${escapeHtml(status)}
+                        </button>`;
+                    }).join('');
 
                     return `<div class="shift-card">
                         <div class="shift-info">
                             <div class="shift-name">${escapeHtml(String(shiftName))}</div>
                             ${shiftDetails ? `<div class="shift-details">${escapeHtml(String(shiftDetails))}</div>` : ''}
                         </div>
-                        <button class="toggle-btn ${btnClass}" 
-                                onclick="toggleAvailability(${shift.id}, '${status || ''}')"
-                                ${!currentAssistant ? 'disabled' : ''}>
-                            ${btnText}
-                        </button>
+                        <div class="status-buttons">
+                            ${statusButtonsHtml}
+                        </div>
                     </div>`;
                 }).join('')}
             </div>`;
@@ -725,22 +787,19 @@
                     }
                 });
 
-                // Register with Grist - columns will appear in widget settings
                 grist.ready({
                     requiredAccess: 'full',
                     allowSelectBy: true,
                     columns: [
                         { name: 'Shift', title: 'Shift Reference', type: 'Ref', optional: false },
                         { name: 'Assistant', title: 'Assistant Reference', type: 'Ref', optional: false },
-                        { name: 'Status', title: 'Status Column', type: 'Text', optional: false },
+                        { name: 'Status', title: 'Status Column', type: 'Choice', optional: false },
                         { name: 'AssistantName', title: 'Assistant Name (from linked table)', type: 'Text', optional: true }
                     ]
                 });
 
-                // Load saved display preferences
                 await loadConfig();
 
-                // Listen for records from the Availability table
                 grist.onRecords(async (records, mappings) => {
                     console.log('Records received:', records?.length, 'mappings:', mappings);
                     
@@ -750,7 +809,6 @@
                         return;
                     }
                     
-                    // Store the mapped column names
                     mappedColumns.Shift = mappings.Shift || null;
                     mappedColumns.Assistant = mappings.Assistant || null;
                     mappedColumns.Status = mappings.Status || null;
@@ -766,14 +824,12 @@
                     
                     hideSetup();
                     
-                    // Store availability records
                     availabilityRecords = records || [];
                     
-                    // Try to get the table ID from the first record or via API
+                    // Detect availability table
                     if (!availabilityTableId) {
                         try {
                             const tables = await grist.docApi.listTables();
-                            // We'll derive it from column metadata
                             const metadata = await fetchColumnMetadata();
                             if (metadata) {
                                 for (const tableName of tables) {
@@ -790,12 +846,11 @@
                         }
                     }
                     
-                    // Derive referenced tables from column types
-                    if (availabilityTableId && (!shiftsTable || !assistantsTable)) {
-                        await deriveTablesFromMappings(availabilityTableId);
+                    // Derive tables and status choices from metadata
+                    if (availabilityTableId) {
+                        await deriveFromMetadata(availabilityTableId);
                     }
                     
-                    // Fetch all shifts
                     if (shiftsTable) {
                         shifts = await fetchShifts();
                     }
@@ -808,16 +863,12 @@
                     }
                 });
 
-                // Listen for assistant selection via "Select By"
                 grist.onRecord(async (record, mappings) => {
                     console.log('Selected record:', record);
                     
                     if (record) {
-                        // The selected record is from the "Select By" table (Assistants)
-                        // Try to get the name from the mapped column or common columns
                         let name = record.Name || record.name || `Assistant ${record.id}`;
                         
-                        // If we have a specific mapping for assistant name
                         if (mappings?.AssistantName && record[mappings.AssistantName]) {
                             name = record[mappings.AssistantName];
                         }
@@ -844,11 +895,10 @@
         }
 
         // Expose functions globally
-        window.toggleAvailability = toggleAvailability;
+        window.setAvailability = setAvailability;
         window.toggleSettings = toggleSettings;
         window.saveSettings = saveSettings;
 
-        // Start
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', init);
         } else {
