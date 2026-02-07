@@ -6,98 +6,277 @@
   <title>Status Buttons Widget</title>
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <style>
+    :root {
+      --background: #ffffff;
+      --foreground: #0f172a;
+      --card: #ffffff;
+      --card-foreground: #0f172a;
+      --muted: #f1f5f9;
+      --muted-foreground: #64748b;
+      --border: #e2e8f0;
+      --input: #e2e8f0;
+      --primary: #0f172a;
+      --primary-foreground: #f8fafc;
+      --secondary: #f1f5f9;
+      --secondary-foreground: #0f172a;
+      --accent: #f1f5f9;
+      --accent-foreground: #0f172a;
+      --ring: #94a3b8;
+      --radius: 0.5rem;
+    }
+
     * {
       box-sizing: border-box;
-    }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       margin: 0;
-      padding: 16px;
-      background: #fff;
+      padding: 0;
     }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+      background: var(--background);
+      color: var(--foreground);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    #app {
+      padding: 16px;
+      max-width: 100%;
+    }
+
     .week-nav {
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 12px;
-      padding: 12px;
+      gap: 8px;
+      padding: 16px;
       margin-bottom: 16px;
-      border-bottom: 2px solid #e0e0e0;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      flex-wrap: wrap;
     }
+
     .week-nav button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       padding: 8px 16px;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      background: #f5f5f5;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--background);
+      color: var(--foreground);
       cursor: pointer;
-      font-size: 16px;
-      transition: all 0.15s;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.15s ease;
+      white-space: nowrap;
     }
+
     .week-nav button:hover {
-      background: #e0e0e0;
-      border-color: #bbb;
+      background: var(--accent);
+      border-color: var(--border);
     }
+
+    .week-nav button:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
+    }
+
+    .week-nav button:active {
+      transform: scale(0.98);
+    }
+
     .week-label {
       font-weight: 600;
-      font-size: 15px;
-      color: #333;
-      min-width: 200px;
+      font-size: 14px;
+      color: var(--foreground);
+      min-width: 160px;
       text-align: center;
+      padding: 0 8px;
     }
+
     .today-btn {
-      font-size: 13px !important;
-      padding: 6px 12px !important;
+      background: var(--primary) !important;
+      color: var(--primary-foreground) !important;
+      border-color: var(--primary) !important;
     }
+
+    .today-btn:hover {
+      opacity: 0.9;
+      background: var(--primary) !important;
+    }
+
+    .records-container {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
     .record {
       display: flex;
       align-items: center;
       gap: 12px;
-      padding: 12px;
-      border-bottom: 1px solid #e0e0e0;
+      padding: 16px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      transition: box-shadow 0.15s ease;
     }
-    .record:last-child {
-      border-bottom: none;
+
+    .record:hover {
+      box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
     }
+
     .title {
       flex: 1;
       font-weight: 500;
-      color: #333;
+      font-size: 14px;
+      color: var(--foreground);
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
-    .current-status {
-      padding: 4px 10px;
-      border-radius: 4px;
-      font-size: 13px;
-      background: #e3f2fd;
-      color: #1565c0;
-      font-weight: 500;
-    }
+
     .buttons {
       display: flex;
       gap: 6px;
       flex-wrap: wrap;
+      justify-content: flex-end;
     }
+
     .status-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       padding: 6px 12px;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      background: #f5f5f5;
+      border: 1px solid transparent;
+      border-radius: calc(var(--radius) - 2px);
+      background: var(--secondary);
+      color: var(--muted-foreground);
       cursor: pointer;
       font-size: 13px;
-      transition: all 0.15s;
+      font-weight: 500;
+      transition: all 0.15s ease;
+      white-space: nowrap;
     }
+
     .status-btn:hover {
-      background: #e0e0e0;
-      border-color: #bbb;
+      background: var(--accent);
+      color: var(--accent-foreground);
     }
-    .no-records {
-      color: #666;
-      text-align: center;
-      padding: 40px;
+
+    .status-btn:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
     }
-    .config-message {
-      color: #666;
+
+    .status-btn:active {
+      transform: scale(0.97);
+    }
+
+    .status-btn.active {
+      font-weight: 600;
+      box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    }
+
+    .no-records, .config-message {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted-foreground);
       text-align: center;
-      padding: 40px;
+      padding: 48px 24px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 14px;
+    }
+
+    /* Responsive styles */
+    @media (max-width: 640px) {
+      #app {
+        padding: 12px;
+      }
+
+      .week-nav {
+        padding: 12px;
+        gap: 6px;
+      }
+
+      .week-nav button {
+        padding: 8px 12px;
+        font-size: 13px;
+      }
+
+      .week-label {
+        width: 100%;
+        order: -1;
+        margin-bottom: 8px;
+        font-size: 13px;
+        min-width: unset;
+      }
+
+      .nav-buttons {
+        display: flex;
+        gap: 6px;
+        width: 100%;
+        justify-content: center;
+      }
+
+      .record {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+        padding: 14px;
+      }
+
+      .title {
+        font-size: 15px;
+        text-align: left;
+      }
+
+      .buttons {
+        justify-content: flex-start;
+        gap: 8px;
+      }
+
+      .status-btn {
+        flex: 1;
+        min-width: calc(50% - 4px);
+        max-width: calc(50% - 4px);
+        padding: 10px 12px;
+        font-size: 13px;
+      }
+    }
+
+    @media (max-width: 400px) {
+      .week-nav button {
+        padding: 6px 10px;
+        font-size: 12px;
+      }
+
+      .week-label {
+        font-size: 12px;
+      }
+
+      .status-btn {
+        min-width: 100%;
+        max-width: 100%;
+      }
+    }
+
+    /* Touch-friendly improvements */
+    @media (hover: none) and (pointer: coarse) {
+      .week-nav button,
+      .status-btn {
+        min-height: 44px;
+      }
+
+      .status-btn {
+        padding: 12px 16px;
+      }
     }
   </style>
 </head>
@@ -117,7 +296,7 @@
     function getWeekStart(date) {
       const d = new Date(date);
       const day = d.getDay();
-      const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday as start
+      const diff = d.getDate() - day + (day === 0 ? -6 : 1);
       d.setDate(diff);
       d.setHours(0, 0, 0, 0);
       return d;
@@ -160,12 +339,10 @@
       if (dateValue instanceof Date) {
         recordDate = dateValue;
       } else if (typeof dateValue === 'number') {
-        // Grist Date and DateTime are Unix timestamps in seconds
         recordDate = new Date(dateValue * 1000);
       } else if (typeof dateValue === 'string') {
         recordDate = new Date(dateValue);
       } else if (typeof dateValue === 'object' && dateValue.getTime) {
-        // Date-like object
         recordDate = new Date(dateValue.getTime());
       } else {
         return false;
@@ -255,21 +432,23 @@
 
       const weekNav = `
         <div class="week-nav">
-          <button onclick="prevWeek()">← Prev</button>
           <span class="week-label">${formatWeekLabel(currentWeekStart)}</span>
-          <button onclick="nextWeek()">Next →</button>
-          <button class="today-btn" onclick="goToToday()">Today</button>
+          <div class="nav-buttons">
+            <button onclick="prevWeek()">← Prev</button>
+            <button class="today-btn" onclick="goToToday()">Today</button>
+            <button onclick="nextWeek()">Next →</button>
+          </div>
         </div>
       `;
 
       if (filteredRecords.length === 0) {
-        app.innerHTML = weekNav + '<div class="no-records">No records for this week.</div>';
+        app.innerHTML = weekNav + '<div class="no-records">No records for this week</div>';
         return;
       }
 
       const allStatuses = getAvailableStatuses();
 
-      app.innerHTML = weekNav + filteredRecords.map(record => {
+      app.innerHTML = weekNav + '<div class="records-container">' + filteredRecords.map(record => {
         const title = record.Title || '(no title)';
         const currentStatus = record.Status || '';
 
@@ -280,12 +459,12 @@
               ${allStatuses.map(status => {
                 const style = choiceStyles[status] || {};
                 const isActive = status === currentStatus;
-                const bgColor = isActive ? (style.fillColor || '#e0e0e0') : '#e0e0e0';
-                const textColor = isActive ? (style.textColor || '#333') : '#888';
-                const activeStyle = isActive ? 'font-weight: 600;' : '';
+                const bgColor = isActive ? (style.fillColor || 'var(--primary)') : 'var(--secondary)';
+                const textColor = isActive ? (style.textColor || 'var(--primary-foreground)') : 'var(--muted-foreground)';
+                const activeClass = isActive ? 'active' : '';
                 return `
-                  <button class="status-btn" 
-                    style="background: ${bgColor}; color: ${textColor}; border-color: ${bgColor}; ${activeStyle}"
+                  <button class="status-btn ${activeClass}" 
+                    style="background: ${bgColor}; color: ${textColor};"
                     onclick="changeStatus(${record.id}, '${escapeJs(status)}')">
                     ${escapeHtml(status)}
                   </button>
@@ -294,7 +473,7 @@
             </div>
           </div>
         `;
-      }).join('');
+      }).join('') + '</div>';
     }
 
     function escapeHtml(text) {
