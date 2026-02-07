@@ -732,17 +732,15 @@
             const displayCol = config.shiftDisplayColumn || 'Name';
             const detailsCol = config.shiftDetailsColumn;
 
-            // Determine which status options to show
-            const availableStatuses = statusChoices.length > 0 
-                ? statusChoices 
-                : ['Available', 'Unavailable']; // Fallback for non-Choice columns
+            // Use status choices from Choice column configuration
+            const availableStatuses = statusChoices;
 
             const html = `<div class="shifts-grid">
                 ${shifts.map(shift => {
                     const availability = availabilityMap[shift.id];
                     const currentStatus = availability?.status || null;
 
-                    const shiftName = shift[displayCol] || `Shift ${shift.id}`;
+                    const shiftName = shift[displayCol];
                     const shiftDetails = detailsCol && shift[detailsCol] ? shift[detailsCol] : '';
 
                     // Generate buttons for each status
@@ -890,37 +888,9 @@
                         // Capture column names from the Assistants table for settings dropdown
                         assistantsColumns = Object.keys(record).filter(c => c !== 'id' && !c.startsWith('grist'));
                         
-                        // Use configured column, fall back to common patterns, then first string column
-                        let name = null;
-                        
-                        // First try configured column
-                        if (config.assistantNameColumn && record[config.assistantNameColumn]) {
-                            name = String(record[config.assistantNameColumn]);
-                        }
-                        
-                        // Fall back to common name patterns
-                        if (!name) {
-                            const namePatterns = ['Name', 'name', 'Full_Name', 'FullName', 'full_name', 
-                                                  'DisplayName', 'display_name', 'Title', 'title'];
-                            for (const pattern of namePatterns) {
-                                if (record[pattern] && typeof record[pattern] === 'string') {
-                                    name = record[pattern];
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        // If no common name found, try first string column (excluding id/system cols)
-                        if (!name) {
-                            for (const [key, value] of Object.entries(record)) {
-                                if (key !== 'id' && !key.startsWith('grist') && typeof value === 'string' && value) {
-                                    name = value;
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        name = name || `Assistant ${record.id}`;
+                        // Use configured column (defaults to 'Name')
+                        const nameCol = config.assistantNameColumn || 'Name';
+                        const name = record[nameCol] ? String(record[nameCol]) : `Assistant ${record.id}`;
                         
                         currentAssistant = {
                             id: record.id,
