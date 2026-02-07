@@ -171,10 +171,10 @@
             <div class="buttons">
               ${allStatuses.map(status => {
                 const style = choiceStyles[status] || {};
-                const bgColor = style.fillColor || '#f5f5f5';
-                const textColor = style.textColor || '#333';
                 const isActive = status === currentStatus;
-                const activeStyle = isActive ? 'box-shadow: 0 0 0 2px #333; font-weight: 600;' : '';
+                const bgColor = isActive ? (style.fillColor || '#e0e0e0') : '#e0e0e0';
+                const textColor = isActive ? (style.textColor || '#333') : '#888';
+                const activeStyle = isActive ? 'font-weight: 600;' : '';
                 return `
                   <button class="status-btn" 
                     style="background: ${bgColor}; color: ${textColor}; border-color: ${bgColor}; ${activeStyle}"
