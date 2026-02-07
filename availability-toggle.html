@@ -875,8 +875,11 @@
                     buildAvailabilityMap();
                     renderShifts();
                     
+                    // Update status even if no assistant is selected yet
                     if (currentAssistant) {
                         updateStatus(`Showing ${shifts.length} shift(s)`, 'success');
+                    } else {
+                        updateStatus('Select an assistant to set availability', 'info');
                     }
                 });
 
