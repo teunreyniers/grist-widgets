@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Status Buttons Widget</title>
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0;
+      padding: 16px;
+      background: #fff;
+    }
+    .record {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      border-bottom: 1px solid #e0e0e0;
+    }
+    .record:last-child {
+      border-bottom: none;
+    }
+    .title {
+      flex: 1;
+      font-weight: 500;
+      color: #333;
+    }
+    .current-status {
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 13px;
+      background: #e3f2fd;
+      color: #1565c0;
+      font-weight: 500;
+    }
+    .buttons {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .status-btn {
+      padding: 6px 12px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background: #f5f5f5;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.15s;
+    }
+    .status-btn:hover {
+      background: #e0e0e0;
+      border-color: #bbb;
+    }
+    .no-records {
+      color: #666;
+      text-align: center;
+      padding: 40px;
+    }
+    .config-message {
+      color: #666;
+      text-align: center;
+      padding: 40px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="config-message">Loading...</div>
+  </div>
+
+  <script>
+    let records = [];
+    let mappings = {};
+    let statusChoices = [];
+
+    grist.ready({
+      columns: [
+        { name: 'Title', title: 'Title', type: 'Text' },
+        { name: 'Status', title: 'Status', type: 'Choice' }
+      ],
+      requiredAccess: 'full'
+    });
+
+    grist.onRecords((data, mappedData) => {
+      records = data;
+      mappings = grist.mapColumnNames(data) ? {} : null;
+      if (mappedData && mappedData.length > 0) {
+        records = mappedData;
+      }
+      render();
+    });
+
+    grist.on('message', async (msg) => {
+      if (msg.tableId) {
+        try {
+          const tables = await grist.docApi.fetchTable(msg.tableId);
+          // Try to get column info for choices
+        } catch (e) {}
+      }
+    });
+
+    // Fetch column options when mappings are set
+    grist.onOptions((options) => {
+      if (options && options.choices) {
+        statusChoices = options.choices;
+        render();
+      }
+    });
+
+    async function fetchChoices() {
+      try {
+        const tableId = await grist.getTable();
+        if (tableId) {
+          const cols = await grist.docApi.listColumns(tableId.tableId);
+          const statusCol = cols.find(c => c.id === 'Status' || c.label === 'Status');
+          if (statusCol && statusCol.type.startsWith('Choice')) {
+            // Parse choices from widget options
+          }
+        }
+      } catch (e) {}
+    }
+
+    async function changeStatus(rowId, newStatus) {
+      try {
+        const table = await grist.getTable();
+        await table.update({ id: rowId, fields: { Status: newStatus } });
+      } catch (e) {
+        console.error('Failed to update status:', e);
+      }
+    }
+
+    function render() {
+      const app = document.getElementById('app');
+
+      // Check if we have mapped columns
+      const mapped = records.length > 0 && records[0].Title !== undefined;
+
+      if (!mapped) {
+        app.innerHTML = '<div class="config-message">Please map the Title and Status columns in widget settings.</div>';
+        return;
+      }
+
+      if (records.length === 0) {
+        app.innerHTML = '<div class="no-records">No records found.</div>';
+        return;
+      }
+
+      // Extract all unique status values from records
+      const allStatuses = [...new Set(records.map(r => r.Status).filter(s => s))];
+
+      app.innerHTML = records.map(record => {
+        const title = record.Title || '(no title)';
+        const currentStatus = record.Status || '';
+        const otherStatuses = allStatuses.filter(s => s !== currentStatus);
+
+        return `
+          <div class="record">
+            <div class="title">${escapeHtml(title)}</div>
+            ${currentStatus ? `<div class="current-status">${escapeHtml(currentStatus)}</div>` : ''}
+            <div class="buttons">
+              ${otherStatuses.map(status => `
+                <button class="status-btn" onclick="changeStatus(${record.id}, '${escapeJs(status)}')">
+                  ${escapeHtml(status)}
+                </button>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function escapeJs(text) {
+      return text.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    }
+  </script>
+</body>
+</html>
