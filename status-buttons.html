@@ -154,9 +154,11 @@
     }
 
     function isInCurrentWeek(dateValue) {
-      if (!dateValue) return false;
-      // Grist dates are Unix timestamps in seconds
-      const recordDate = new Date(dateValue * 1000);
+      if (dateValue === null || dateValue === undefined) return false;
+      // Grist Date and DateTime are Unix timestamps in seconds
+      const timestamp = typeof dateValue === 'number' ? dateValue : Number(dateValue);
+      if (isNaN(timestamp)) return false;
+      const recordDate = new Date(timestamp * 1000);
       const weekEnd = getWeekEnd(currentWeekStart);
       return recordDate >= currentWeekStart && recordDate <= weekEnd;
     }
@@ -165,7 +167,7 @@
       columns: [
         { name: 'Title', title: 'Title', type: 'Text' },
         { name: 'Status', title: 'Status', type: 'Choice' },
-        { name: 'Date', title: 'Date', type: 'Date' }
+        { name: 'Date', title: 'Date', type: 'Date,DateTime', description: 'Date or DateTime column' }
       ],
       requiredAccess: 'full'
     });
