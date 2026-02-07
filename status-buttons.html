@@ -75,8 +75,8 @@
 
   <script>
     let records = [];
-    let columnMappings = null;
     let statusChoices = [];
+    let statusColumnId = null;
 
     grist.ready({
       columns: [
@@ -86,24 +86,27 @@
       requiredAccess: 'full'
     });
 
-    grist.onRecords((data, mappings) => {
-      columnMappings = mappings;
-      const mapped = grist.mapColumnNames(data);
-      records = mapped || [];
-      if (mapped) {
-        fetchStatusChoices();
-      }
+    grist.onRecords((data) => {
+      records = grist.mapColumnNames(data) || [];
       render();
     });
 
+    grist.on('message', (msg) => {
+      if (msg.tableId && msg.mappings) {
+        statusColumnId = msg.mappings.Status || null;
+        if (statusColumnId) {
+          fetchStatusChoices();
+        }
+      }
+    });
+
     async function fetchStatusChoices() {
-      if (!columnMappings || !columnMappings.Status) return;
+      if (!statusColumnId) return;
 
       try {
-        const tableId = await grist.selectedTable.getTableId();
         const columns = await grist.docApi.fetchTable('_grist_Tables_column');
 
-        const colIndex = columns.colId.indexOf(columnMappings.Status);
+        const colIndex = columns.colId.indexOf(statusColumnId);
         if (colIndex === -1) return;
 
         const colType = columns.type[colIndex];
@@ -140,11 +143,6 @@
 
     function render() {
       const app = document.getElementById('app');
-
-      if (!columnMappings) {
-        app.innerHTML = '<div class="config-message">Please map the Title and Status columns in widget settings.</div>';
-        return;
-      }
 
       if (records.length === 0) {
         app.innerHTML = '<div class="no-records">No records found.</div>';
