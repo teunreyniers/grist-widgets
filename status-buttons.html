@@ -91,9 +91,9 @@
       render();
     });
 
-    grist.on('message', (msg) => {
-      if (msg.tableId && msg.mappings) {
-        statusColumnId = msg.mappings.Status || null;
+    grist.onOptions((options) => {
+      if (options && options.mappings) {
+        statusColumnId = options.mappings.Status || null;
         if (statusColumnId) {
           fetchStatusChoices();
         }
