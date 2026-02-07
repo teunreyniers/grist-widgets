@@ -76,6 +76,7 @@
   <script>
     let records = [];
     let statusChoices = [];
+    let choiceStyles = {};
     let tableId = null;
     let statusColumnId = null;
 
@@ -129,6 +130,7 @@
         const options = JSON.parse(widgetOptions);
         if (options.choices && Array.isArray(options.choices)) {
           statusChoices = options.choices;
+          choiceStyles = options.choiceOptions || {};
           render();
         }
       } catch (e) {
@@ -162,18 +164,25 @@
       app.innerHTML = records.map(record => {
         const title = record.Title || '(no title)';
         const currentStatus = record.Status || '';
-        const otherStatuses = allStatuses.filter(s => s !== currentStatus);
 
         return `
           <div class="record">
             <div class="title">${escapeHtml(title)}</div>
-            ${currentStatus ? `<div class="current-status">${escapeHtml(currentStatus)}</div>` : ''}
             <div class="buttons">
-              ${otherStatuses.map(status => `
-                <button class="status-btn" onclick="changeStatus(${record.id}, '${escapeJs(status)}')">
-                  ${escapeHtml(status)}
-                </button>
-              `).join('')}
+              ${allStatuses.map(status => {
+                const style = choiceStyles[status] || {};
+                const bgColor = style.fillColor || '#f5f5f5';
+                const textColor = style.textColor || '#333';
+                const isActive = status === currentStatus;
+                const activeStyle = isActive ? 'box-shadow: 0 0 0 2px #333; font-weight: 600;' : '';
+                return `
+                  <button class="status-btn" 
+                    style="background: ${bgColor}; color: ${textColor}; border-color: ${bgColor}; ${activeStyle}"
+                    onclick="changeStatus(${record.id}, '${escapeJs(status)}')">
+                    ${escapeHtml(status)}
+                  </button>
+                `;
+              }).join('')}
             </div>
           </div>
         `;
