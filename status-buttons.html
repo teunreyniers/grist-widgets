@@ -291,6 +291,7 @@
     let choiceStyles = {};
     let tableId = null;
     let statusColumnId = null;
+    let styleFallbackColumnId = null;
     let currentWeekStart = getWeekStart(new Date());
 
     function getWeekStart(date) {
@@ -357,7 +358,8 @@
       columns: [
         { name: 'Title', title: 'Title', type: 'Text' },
         { name: 'Status', title: 'Status', type: 'Choice' },
-        { name: 'Date', title: 'Date', type: 'Date,DateTime', description: 'Date or DateTime column' }
+        { name: 'Date', title: 'Date', type: 'Date,DateTime', description: 'Date or DateTime column' },
+        { name: 'StyleFallback', title: 'Style Fallback Column', type: 'Choice', optional: true, description: 'Choice column to get styles from if Status column has no styles' }
       ],
       requiredAccess: 'full'
     });
@@ -366,6 +368,11 @@
       records = grist.mapColumnNames(data) || [];
       if (mappings && mappings.Status) {
         statusColumnId = mappings.Status;
+      }
+      if (mappings && mappings.StyleFallback) {
+        styleFallbackColumnId = mappings.StyleFallback;
+      }
+      if (statusColumnId) {
         fetchStatusChoices();
       }
       render();
@@ -380,13 +387,13 @@
       }
     });
 
-    async function fetchStatusChoices() {
-      if (!statusColumnId || !tableId) return;
+    async function fetchChoiceStyles(columnId) {
+      if (!columnId || !tableId) return null;
 
       // Try using REST API with access token (works with read/write access)
       try {
         const tokenInfo = await grist.getAccessToken({ readOnly: true });
-        const response = await fetch(`${tokenInfo.baseUrl}/tables/${tableId}/columns/${statusColumnId}`, {
+        const response = await fetch(`${tokenInfo.baseUrl}/tables/${tableId}/columns/${columnId}`, {
           headers: { 'Authorization': `Bearer ${tokenInfo.token}` }
         });
         
@@ -398,10 +405,10 @@
               ? JSON.parse(widgetOptions) 
               : widgetOptions;
             if (options.choices && Array.isArray(options.choices)) {
-              statusChoices = options.choices;
-              choiceStyles = options.choiceOptions || {};
-              render();
-              return;
+              return {
+                choices: options.choices,
+                styles: options.choiceOptions || {}
+              };
             }
           }
         }
@@ -415,27 +422,70 @@
         const columns = await grist.docApi.fetchTable('_grist_Tables_column');
 
         const tableRef = tables.id[tables.tableId.indexOf(tableId)];
-        if (!tableRef) return;
+        if (!tableRef) return null;
 
         const colIndex = columns.id.findIndex((id, i) => 
-          columns.parentId[i] === tableRef && columns.colId[i] === statusColumnId
+          columns.parentId[i] === tableRef && columns.colId[i] === columnId
         );
-        if (colIndex === -1) return;
+        if (colIndex === -1) return null;
 
         const colType = columns.type[colIndex];
-        if (!colType || !colType.startsWith('Choice')) return;
+        if (!colType || !colType.startsWith('Choice')) return null;
 
         const widgetOptions = columns.widgetOptions[colIndex];
-        if (!widgetOptions) return;
+        if (!widgetOptions) return null;
 
         const options = JSON.parse(widgetOptions);
         if (options.choices && Array.isArray(options.choices)) {
-          statusChoices = options.choices;
-          choiceStyles = options.choiceOptions || {};
-          render();
+          return {
+            choices: options.choices,
+            styles: options.choiceOptions || {}
+          };
         }
       } catch (e) {
-        console.error('Failed to fetch status choices:', e);
+        console.error('Failed to fetch choice styles:', e);
+      }
+
+      return null;
+    }
+
+    async function fetchStatusChoices() {
+      if (!statusColumnId || !tableId) return;
+
+      // Try to get choices and styles from the main Status column
+      const mainResult = await fetchChoiceStyles(statusColumnId);
+      
+      if (mainResult) {
+        statusChoices = mainResult.choices;
+        // Check if we have actual styles, if not try fallback
+        const hasStyles = Object.keys(mainResult.styles).length > 0;
+        
+        if (hasStyles) {
+          choiceStyles = mainResult.styles;
+        } else if (styleFallbackColumnId) {
+          // Try to get styles from fallback column
+          const fallbackResult = await fetchChoiceStyles(styleFallbackColumnId);
+          if (fallbackResult && Object.keys(fallbackResult.styles).length > 0) {
+            choiceStyles = fallbackResult.styles;
+          } else {
+            choiceStyles = {};
+          }
+        } else {
+          choiceStyles = {};
+        }
+        render();
+        return;
+      }
+
+      // If main column fetch failed entirely, try fallback for both choices and styles
+      if (styleFallbackColumnId) {
+        const fallbackResult = await fetchChoiceStyles(styleFallbackColumnId);
+        if (fallbackResult) {
+          statusChoices = fallbackResult.choices;
+          choiceStyles = fallbackResult.styles;
+          render();
+          return;
+        }
       }
     }
 
