@@ -291,7 +291,6 @@
     let choiceStyles = {};
     let tableId = null;
     let statusColumnId = null;
-    let styleFallbackColumnId = null;
     let currentWeekStart = getWeekStart(new Date());
 
     function getWeekStart(date) {
@@ -359,7 +358,7 @@
         { name: 'Title', title: 'Title', type: 'Text' },
         { name: 'Status', title: 'Status', type: 'Choice' },
         { name: 'Date', title: 'Date', type: 'Date,DateTime', description: 'Date or DateTime column' },
-        { name: 'StyleFallback', title: 'Style Fallback Column', type: 'Choice', optional: true, description: 'Choice column to get styles from if Status column has no styles' }
+        { name: 'StyleFallback', title: 'Style Fallback Column', type: 'Text', optional: true, description: 'JSON array of style definitions, e.g. [{"value": "Todo", "color": "#ff0000"}]' }
       ],
       requiredAccess: 'full'
     });
@@ -368,11 +367,6 @@
       records = grist.mapColumnNames(data) || [];
       if (mappings && mappings.Status) {
         statusColumnId = mappings.Status;
-      }
-      if (mappings && mappings.StyleFallback) {
-        styleFallbackColumnId = mappings.StyleFallback;
-      }
-      if (statusColumnId) {
         fetchStatusChoices();
       }
       render();
@@ -449,6 +443,35 @@
       return null;
     }
 
+    function parseStyleFallbackFromRecords() {
+      // Look for StyleFallback data in records (first non-empty value)
+      if (!records || records.length === 0) return null;
+      
+      for (const record of records) {
+        const fallbackData = record.StyleFallback;
+        if (!fallbackData) continue;
+        
+        try {
+          const styles = typeof fallbackData === 'string' ? JSON.parse(fallbackData) : fallbackData;
+          if (Array.isArray(styles)) {
+            const result = {};
+            for (const item of styles) {
+              if (item && item.value) {
+                result[item.value] = {
+                  fillColor: item.color || item.fillColor || '#64748b',
+                  textColor: item.textColor || '#ffffff'
+                };
+              }
+            }
+            return result;
+          }
+        } catch (e) {
+          console.error('Failed to parse StyleFallback JSON:', e);
+        }
+      }
+      return null;
+    }
+
     async function fetchStatusChoices() {
       if (!statusColumnId || !tableId) return;
 
@@ -457,35 +480,27 @@
       
       if (mainResult) {
         statusChoices = mainResult.choices;
-        // Check if we have actual styles, if not try fallback
+        // Check if we have actual styles, if not try fallback from column data
         const hasStyles = Object.keys(mainResult.styles).length > 0;
         
         if (hasStyles) {
           choiceStyles = mainResult.styles;
-        } else if (styleFallbackColumnId) {
-          // Try to get styles from fallback column
-          const fallbackResult = await fetchChoiceStyles(styleFallbackColumnId);
-          if (fallbackResult && Object.keys(fallbackResult.styles).length > 0) {
-            choiceStyles = fallbackResult.styles;
-          } else {
-            choiceStyles = {};
-          }
         } else {
-          choiceStyles = {};
+          // Try to get styles from StyleFallback column values
+          const fallbackStyles = parseStyleFallbackFromRecords();
+          choiceStyles = fallbackStyles || {};
         }
         render();
         return;
       }
 
-      // If main column fetch failed entirely, try fallback for both choices and styles
-      if (styleFallbackColumnId) {
-        const fallbackResult = await fetchChoiceStyles(styleFallbackColumnId);
-        if (fallbackResult) {
-          statusChoices = fallbackResult.choices;
-          choiceStyles = fallbackResult.styles;
-          render();
-          return;
-        }
+      // If main column fetch failed entirely, try fallback from column data
+      const fallbackStyles = parseStyleFallbackFromRecords();
+      if (fallbackStyles) {
+        // Extract status choices from the fallback styles if available
+        statusChoices = Object.keys(fallbackStyles);
+        choiceStyles = fallbackStyles;
+        render();
       }
     }
 
