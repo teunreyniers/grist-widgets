@@ -144,14 +144,26 @@
       box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
     }
 
-    .title {
+    .record-info {
       flex: 1;
+      min-width: 0;
+    }
+
+    .title {
       font-weight: 500;
       font-size: 14px;
       color: var(--foreground);
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+
+    .details {
+      margin-top: 4px;
+      font-size: 13px;
+      color: var(--muted-foreground);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
     }
 
     .buttons {
@@ -373,6 +385,7 @@
         { name: 'Title', title: 'Title', type: 'Text' },
         { name: 'Status', title: 'Status', type: 'Choice' },
         { name: 'Date', title: 'Date', type: 'Date,DateTime', description: 'Date or DateTime column' },
+        { name: 'Details', title: 'Details', type: 'Text', optional: true },
         { name: 'StyleFallback', title: 'Style Fallback Column', type: 'Text', optional: true, description: 'JSON array of style definitions, e.g. [{"value": "Todo", "color": "#ff0000"}]' }
       ],
       requiredAccess: 'full'
@@ -588,11 +601,16 @@
 
       app.innerHTML = weekNav + '<div class="records-container">' + filteredRecords.map(record => {
         const title = record.Title || '(no title)';
+        const details = record.Details || '';
         const currentStatus = record.Status || '';
+        const detailsHtml = details ? `<div class="details">${escapeHtml(details)}</div>` : '';
 
         return `
           <div class="record">
-            <div class="title">${escapeHtml(title)}</div>
+            <div class="record-info">
+              <div class="title">${escapeHtml(title)}</div>
+              ${detailsHtml}
+            </div>
             <div class="buttons">
               ${allStatuses.map(status => {
                 const style = choiceStyles[status] || {};
