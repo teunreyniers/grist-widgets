@@ -97,6 +97,21 @@
       padding: 0 8px;
     }
 
+    .week-status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: center;
+      width: 100%;
+    }
+
+    .week-status-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted-foreground);
+    }
+
     .today-btn {
       background: var(--primary) !important;
       color: var(--primary-foreground) !important;
@@ -513,6 +528,19 @@
       }
     }
 
+    async function changeWeekStatus(newStatus) {
+      try {
+        const table = await grist.selectedTable;
+        const weekRecords = records.filter(r => isInCurrentWeek(r.Date));
+        for (const record of weekRecords) {
+          await table.update({ id: record.id, fields: { Status: newStatus } });
+        }
+        render();
+      } catch (e) {
+        console.error('Failed to update week status:', e);
+      }
+    }
+
     function getAvailableStatuses() {
       return statusChoices;
     }
@@ -521,6 +549,25 @@
       const app = document.getElementById('app');
 
       const filteredRecords = records.filter(r => isInCurrentWeek(r.Date));
+      const allStatuses = getAvailableStatuses();
+      const weekStatusButtons = allStatuses.map(status => {
+        const style = choiceStyles[status] || {};
+        const bgColor = style.fillColor || 'var(--secondary)';
+        const textColor = style.textColor || 'var(--muted-foreground)';
+        return `
+          <button class="status-btn" 
+            style="background: ${bgColor}; color: ${textColor};"
+            onclick="changeWeekStatus('${escapeJs(status)}')">
+            ${escapeHtml(status)}
+          </button>
+        `;
+      }).join('');
+      const weekStatusControls = allStatuses.length ? `
+        <div class="week-status">
+          <span class="week-status-label">Set week:</span>
+          ${weekStatusButtons}
+        </div>
+      ` : '';
 
       const weekNav = `
         <div class="week-nav">
@@ -530,6 +577,7 @@
             <button class="today-btn" onclick="goToToday()">Today</button>
             <button onclick="nextWeek()">Next →</button>
           </div>
+          ${weekStatusControls}
         </div>
       `;
 
@@ -537,8 +585,6 @@
         app.innerHTML = weekNav + '<div class="no-records">No records for this week</div>';
         return;
       }
-
-      const allStatuses = getAvailableStatuses();
 
       app.innerHTML = weekNav + '<div class="records-container">' + filteredRecords.map(record => {
         const title = record.Title || '(no title)';
