@@ -314,7 +314,6 @@
 
   <script>
     let records = [];
-    let statusChoices = [];
     let choiceStyles = {};
     let tableId = null;
     let statusColumnId = null;
@@ -384,6 +383,7 @@
       columns: [
         { name: 'Title', title: 'Title', type: 'Text' },
         { name: 'Status', title: 'Status', type: 'Choice' },
+        { name: 'Options', title: 'Options', type: 'ChoiceList', description: 'Per-row status options' },
         { name: 'Date', title: 'Date', type: 'Date,DateTime', description: 'Date or DateTime column' },
         { name: 'Details', title: 'Details', type: 'Text', optional: true },
         { name: 'StyleFallback', title: 'Style Fallback Column', type: 'Text', optional: true, description: 'JSON array of style definitions, e.g. [{"value": "Todo", "color": "#ff0000"}]' }
@@ -507,7 +507,6 @@
       const mainResult = await fetchChoiceStyles(statusColumnId);
       
       if (mainResult) {
-        statusChoices = mainResult.choices;
         // Check if we have actual styles, if not try fallback from column data
         const hasStyles = Object.keys(mainResult.styles).length > 0;
         
@@ -525,8 +524,6 @@
       // If main column fetch failed entirely, try fallback from column data
       const fallbackStyles = parseStyleFallbackFromRecords();
       if (fallbackStyles) {
-        // Extract status choices from the fallback styles if available
-        statusChoices = Object.keys(fallbackStyles);
         choiceStyles = fallbackStyles;
         render();
       }
@@ -554,16 +551,50 @@
       }
     }
 
-    function getAvailableStatuses() {
-      return statusChoices;
+    function normalizeOptions(value) {
+      if (value === null || value === undefined) return [];
+      if (Array.isArray(value)) {
+        return value.map(option => `${option}`.trim()).filter(Boolean);
+      }
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return [];
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (Array.isArray(parsed)) {
+              return parsed.map(option => `${option}`.trim()).filter(Boolean);
+            }
+          } catch (e) {
+            console.warn('Failed to parse Options JSON, falling back to commas:', e);
+          }
+        }
+        return trimmed.split(',').map(option => option.trim()).filter(Boolean);
+      }
+      return [`${value}`.trim()].filter(Boolean);
+    }
+
+    function getRecordOptions(record) {
+      return normalizeOptions(record.Options);
+    }
+
+    function getWeekOptions(weekRecords) {
+      if (!weekRecords.length) return [];
+      let intersection = new Set(getRecordOptions(weekRecords[0]));
+      for (const record of weekRecords.slice(1)) {
+        const options = new Set(getRecordOptions(record));
+        intersection = new Set([...intersection].filter(option => options.has(option)));
+        if (intersection.size === 0) break;
+      }
+      return Array.from(intersection);
     }
 
     function render() {
       const app = document.getElementById('app');
 
       const filteredRecords = records.filter(r => isInCurrentWeek(r.Date));
-      const allStatuses = getAvailableStatuses();
-      const weekStatusButtons = allStatuses.map(status => {
+      const weekStatuses = getWeekOptions(filteredRecords);
+      const weekStatusButtons = weekStatuses.map(status => {
         const style = choiceStyles[status] || {};
         const bgColor = style.fillColor || 'var(--secondary)';
         const textColor = style.textColor || 'var(--muted-foreground)';
@@ -575,7 +606,7 @@
           </button>
         `;
       }).join('');
-      const weekStatusControls = allStatuses.length ? `
+      const weekStatusControls = weekStatuses.length ? `
         <div class="week-status">
           <span class="week-status-label">Set week:</span>
           ${weekStatusButtons}
@@ -603,6 +634,7 @@
         const title = record.Title || '(no title)';
         const details = record.Details || '';
         const currentStatus = record.Status || '';
+        const recordOptions = getRecordOptions(record);
         const detailsHtml = details ? `<div class="details">${escapeHtml(details)}</div>` : '';
 
         return `
@@ -612,7 +644,7 @@
               ${detailsHtml}
             </div>
             <div class="buttons">
-              ${allStatuses.map(status => {
+              ${recordOptions.map(status => {
                 const style = choiceStyles[status] || {};
                 const isActive = status === currentStatus;
                 const bgColor = isActive ? (style.fillColor || 'var(--primary)') : 'var(--secondary)';
