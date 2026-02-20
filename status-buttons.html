@@ -385,8 +385,7 @@
         { name: 'Status', title: 'Status', type: 'Choice' },
         { name: 'Options', title: 'Options', type: 'ChoiceList', description: 'Per-row status options' },
         { name: 'Date', title: 'Date', type: 'Date,DateTime', description: 'Date or DateTime column' },
-        { name: 'Details', title: 'Details', type: 'Text', optional: true },
-        { name: 'StyleFallback', title: 'Style Fallback Column', type: 'Text', optional: true, description: 'JSON array of style definitions, e.g. [{"value": "Todo", "color": "#ff0000"}]' }
+        { name: 'Details', title: 'Details', type: 'Text', optional: true }
       ],
       requiredAccess: 'full'
     });
@@ -471,35 +470,6 @@
       return null;
     }
 
-    function parseStyleFallbackFromRecords() {
-      // Look for StyleFallback data in records (first non-empty value)
-      if (!records || records.length === 0) return null;
-      
-      for (const record of records) {
-        const fallbackData = record.StyleFallback;
-        if (!fallbackData) continue;
-        
-        try {
-          const styles = typeof fallbackData === 'string' ? JSON.parse(fallbackData) : fallbackData;
-          if (Array.isArray(styles)) {
-            const result = {};
-            for (const item of styles) {
-              if (item && item.value) {
-                result[item.value] = {
-                  fillColor: item.color || item.fillColor || '#64748b',
-                  textColor: item.textColor || '#ffffff'
-                };
-              }
-            }
-            return result;
-          }
-        } catch (e) {
-          console.error('Failed to parse StyleFallback JSON:', e);
-        }
-      }
-      return null;
-    }
-
     async function fetchStatusChoices() {
       if (!statusColumnId || !tableId) return;
 
@@ -513,19 +483,10 @@
         if (hasStyles) {
           choiceStyles = mainResult.styles;
         } else {
-          // Try to get styles from StyleFallback column values
-          const fallbackStyles = parseStyleFallbackFromRecords();
-          choiceStyles = fallbackStyles || {};
+          choiceStyles = {};
         }
         render();
         return;
-      }
-
-      // If main column fetch failed entirely, try fallback from column data
-      const fallbackStyles = parseStyleFallbackFromRecords();
-      if (fallbackStyles) {
-        choiceStyles = fallbackStyles;
-        render();
       }
     }
 
@@ -551,10 +512,22 @@
       }
     }
 
+    function normalizeOptionItem(option) {
+      if (option === null || option === undefined) return null;
+      if (typeof option === 'object') {
+        if (option.value !== undefined) return `${option.value}`.trim();
+        if (option.label !== undefined) return `${option.label}`.trim();
+        if (option.name !== undefined) return `${option.name}`.trim();
+        if (option.text !== undefined) return `${option.text}`.trim();
+        if (option.display !== undefined) return `${option.display}`.trim();
+      }
+      return `${option}`.trim();
+    }
+
     function normalizeOptions(value) {
       if (value === null || value === undefined) return [];
       if (Array.isArray(value)) {
-        return value.map(option => `${option}`.trim()).filter(Boolean);
+        return value.map(normalizeOptionItem).filter(Boolean);
       }
       if (typeof value === 'string') {
         const trimmed = value.trim();
@@ -563,7 +536,7 @@
           try {
             const parsed = JSON.parse(trimmed);
             if (Array.isArray(parsed)) {
-              return parsed.map(option => `${option}`.trim()).filter(Boolean);
+              return parsed.map(normalizeOptionItem).filter(Boolean);
             }
           } catch (e) {
             console.warn('Failed to parse Options JSON, falling back to commas:', e);
@@ -571,7 +544,7 @@
         }
         return trimmed.split(',').map(option => option.trim()).filter(Boolean);
       }
-      return [`${value}`.trim()].filter(Boolean);
+      return [normalizeOptionItem(value)].filter(Boolean);
     }
 
     function getRecordOptions(record) {
