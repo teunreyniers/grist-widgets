@@ -321,6 +321,8 @@
     let statusRefLookup = null;
     let statusRefTableId = null;
     let statusRefDisplayColId = null;
+    let statusRawById = null;
+    let statusMetaBlocked = false;
     let loggedMissingRefLookup = false;
     let dateColumnId = null;
     let currentWeekStart = getWeekStart(new Date());
@@ -405,6 +407,7 @@
         dateColumnId = mappings.Date || null;
         if (statusColumnId) {
           fetchStatusChoices();
+          refreshStatusRawValues();
         }
       }
       render();
@@ -416,6 +419,7 @@
         console.info('Table selected', { tableId });
         if (statusColumnId) {
           fetchStatusChoices();
+          refreshStatusRawValues();
         }
       }
     });
@@ -480,28 +484,39 @@
       return null;
     }
 
+    function inferStatusColumnType() {
+      if (!records || !records.length) return null;
+      for (const record of records) {
+        const value = record.Status;
+        if (value === null || value === undefined) continue;
+        if (Array.isArray(value)) return 'RefList';
+        if (typeof value === 'number') return 'Ref';
+        if (typeof value === 'object') {
+          const id = extractRefId(value);
+          if (id !== null) return 'Ref';
+        }
+      }
+      return null;
+    }
+
     async function fetchStatusChoices() {
       if (!statusColumnId || !tableId) return;
 
       console.info('Fetching status choices', { tableId, statusColumnId });
-      const mainResult = await fetchChoiceStyles(statusColumnId);
+      choiceStyles = {};
+      statusColumnType = statusColumnType || inferStatusColumnType() || 'RefList';
 
-      if (mainResult) {
-        statusColumnType = mainResult.type || null;
-        const hasStyles = Object.keys(mainResult.styles).length > 0;
-        choiceStyles = hasStyles ? mainResult.styles : {};
-        if (!statusColumnType || !statusColumnType.startsWith('RefList')) {
-          console.warn('Status column must be RefList', { statusColumnType });
-          render();
-          return;
-        }
-        await fetchStatusRefLookup();
-        console.info('Status choices ready', { choiceCount: mainResult.choices.length, hasStyles });
+      if (!statusColumnType || !statusColumnType.startsWith('RefList')) {
+        console.warn('Status column must be RefList', { statusColumnType });
         render();
         return;
       }
 
-      console.warn('Status choices unavailable', { tableId, statusColumnId });
+      if (!statusMetaBlocked) {
+        await fetchStatusRefLookup();
+      }
+
+      render();
     }
 
     function getRefTableIdFromType(type) {
@@ -544,6 +559,7 @@
     }
 
     async function fetchStatusRefLookup() {
+      if (statusMetaBlocked) return;
       loggedMissingRefLookup = false;
       statusRefLookup = null;
       statusRefTableId = null;
@@ -586,7 +602,28 @@
           entryCount: lookup.size
         });
       } catch (e) {
+        const message = e && e.message ? e.message : '';
+        if (message.includes('ACL_DENY') || message.includes('Blocked by table read access rules')) {
+          statusMetaBlocked = true;
+        }
         console.error('Failed to load status ref lookup:', e);
+      }
+    }
+
+    async function refreshStatusRawValues() {
+      if (!tableId || !statusColumnId) return;
+      try {
+        const table = await grist.docApi.fetchTable(tableId);
+        const ids = table.id || [];
+        const values = table[statusColumnId] || [];
+        const lookup = new Map();
+        ids.forEach((id, i) => {
+          lookup.set(id, values[i]);
+        });
+        statusRawById = lookup;
+        render();
+      } catch (e) {
+        console.error('Failed to load raw status values:', e);
       }
     }
 
@@ -621,7 +658,8 @@
     function coerceRefListValue(value) {
       if (value === null || value === undefined) return [];
       if (Array.isArray(value)) {
-        return value
+        const items = value[0] === 'L' ? value.slice(1) : value;
+        return items
           .map(item => {
             const mapped = mapStatusLabelToRef(item);
             if (mapped !== null && mapped !== undefined) return mapped;
@@ -653,26 +691,31 @@
 
     function coerceStatusValue(value) {
       if (!statusColumnType) return value;
-      if (statusColumnType.startsWith('RefList')) return coerceRefListValue(value);
+      if (statusColumnType.startsWith('RefList')) {
+        const list = coerceRefListValue(value);
+        return ['L', ...list];
+      }
       if (statusColumnType.startsWith('Ref')) return coerceRefValue(value);
       return value;
     }
 
     async function changeStatus(rowId, newStatus) {
+      if (!statusColumnId) return;
       try {
         const table = await grist.selectedTable;
-        await table.update({ id: rowId, fields: { Status: coerceStatusValue(newStatus) } });
+        await table.update({ id: rowId, fields: { [statusColumnId]: coerceStatusValue(newStatus) } });
       } catch (e) {
         console.error('Failed to update status:', e);
       }
     }
 
     async function changeWeekStatus(newStatus) {
+      if (!statusColumnId) return;
       try {
         const table = await grist.selectedTable;
         const weekRecords = records.filter(r => isInCurrentWeek(r.Date));
         for (const record of weekRecords) {
-          await table.update({ id: record.id, fields: { Status: coerceStatusValue(newStatus) } });
+          await table.update({ id: record.id, fields: { [statusColumnId]: coerceStatusValue(newStatus) } });
         }
         render();
       } catch (e) {
@@ -763,6 +806,26 @@
       }
       if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime();
       return JSON.stringify(a) === JSON.stringify(b);
+    }
+
+    function isOptionSelected(optionValue, currentValue) {
+      if (statusColumnType && statusColumnType.startsWith('RefList')) {
+        const currentList = normalizeRefListValue(currentValue);
+        const optionList = normalizeRefListValue(optionValue);
+        if (currentList.length === 0 && optionList.length === 0) return true;
+        if (optionList.length === 1) {
+          return currentList.includes(optionList[0]);
+        }
+        if (optionList.length > 1) {
+          if (optionList.length !== currentList.length) return false;
+          return optionList.every((value, index) => value === currentList[index]);
+        }
+        return false;
+      }
+      if (optionValue === null || optionValue === undefined || optionValue === '') {
+        return currentValue === null || currentValue === undefined || currentValue === '';
+      }
+      return areValuesEqual(optionValue, currentValue);
     }
 
     function serializeOptionValue(value) {
@@ -905,7 +968,9 @@
       app.innerHTML = weekNav + '<div class="records-container">' + filteredRecords.map(record => {
         const title = record.Title || '(no title)';
         const details = record.Details || '';
-        const currentStatus = record.Status;
+        const currentStatus = statusRawById && statusRawById.has(record.id)
+          ? statusRawById.get(record.id)
+          : record.Status;
         const recordOptions = getRecordOptions(record);
         const detailsHtml = details ? `<div class="details">${escapeHtml(details)}</div>` : '';
 
@@ -918,7 +983,7 @@
             <div class="buttons">
               ${recordOptions.map(option => {
                 const style = getChoiceStyle(option);
-                const isActive = areValuesEqual(option.value, currentStatus);
+                const isActive = isOptionSelected(option.value, currentStatus);
                 const bgColor = isActive ? (style.fillColor || 'var(--primary)') : 'var(--secondary)';
                 const textColor = isActive ? (style.textColor || 'var(--primary-foreground)') : 'var(--muted-foreground)';
                 const activeClass = isActive ? 'active' : '';

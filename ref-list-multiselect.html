@@ -127,7 +127,8 @@
 
   <script>
     let tableId = null;
-    let columnId = null;
+    let mappedColumnId = null;
+    let refListColumnId = null;
     let columnType = null;
     let refTableId = null;
     let displayColId = null;
@@ -148,10 +149,10 @@
       currentRecord = record || null;
       currentRecordId = record && typeof record.id === 'number' ? record.id : null;
       if (mappings) {
-        columnId = mappings.Selections || null;
+        mappedColumnId = mappings.Selections || null;
       }
       updateSelectedIds();
-      if (tableId && columnId) {
+      if (tableId && mappedColumnId) {
         refreshColumnMeta();
       }
       render();
@@ -160,7 +161,7 @@
     grist.on('message', (msg) => {
       if (msg.tableId) {
         tableId = msg.tableId;
-        if (columnId) {
+        if (mappedColumnId) {
           refreshColumnMeta();
         }
       }
@@ -206,7 +207,7 @@
     }
 
     async function refreshColumnMeta() {
-      if (!tableId || !columnId || isLoadingRefRecords) return;
+      if (!tableId || !mappedColumnId || isLoadingRefRecords) return;
       isLoadingRefRecords = true;
       try {
         const tables = await grist.docApi.fetchTable('_grist_Tables');
@@ -217,11 +218,29 @@
         if (!tableRef) return;
 
         const colIndex = columns.id.findIndex((id, i) =>
-          columns.parentId[i] === tableRef && columns.colId[i] === columnId
+          columns.parentId[i] === tableRef && columns.colId[i] === mappedColumnId
         );
         if (colIndex === -1) return;
 
-        columnType = columns.type[colIndex] || null;
+        const mappedType = columns.type[colIndex] || null;
+        let resolvedType = mappedType;
+        let resolvedColId = mappedColumnId;
+
+        if (!mappedType || !mappedType.startsWith('RefList')) {
+          const displayColRef = columns.id[colIndex];
+          if (Array.isArray(columns.displayCol)) {
+            const refListIndex = columns.displayCol.findIndex((displayRef, i) =>
+              displayRef === displayColRef && columns.parentId[i] === tableRef && columns.type[i] && columns.type[i].startsWith('RefList')
+            );
+            if (refListIndex !== -1) {
+              resolvedColId = columns.colId[refListIndex];
+              resolvedType = columns.type[refListIndex];
+            }
+          }
+        }
+
+        columnType = resolvedType || null;
+        refListColumnId = resolvedColId;
         if (!columnType || !columnType.startsWith('RefList')) return;
 
         refTableId = getRefTableIdFromType(columnType);
@@ -235,6 +254,7 @@
           id,
           label: labels[i] !== undefined && labels[i] !== null ? `${labels[i]}` : `${id}`
         }));
+        await syncSelectedIdsFromTable();
       } catch (e) {
         console.error('Failed to load ref records:', e);
       } finally {
@@ -262,7 +282,8 @@
     function coerceRefListValue(value) {
       if (value === null || value === undefined) return [];
       if (Array.isArray(value)) {
-        return value
+        const items = value[0] === 'L' ? value.slice(1) : value;
+        return items
           .map(item => extractRefId(item))
           .filter(id => typeof id === 'number' && !Number.isNaN(id));
       }
@@ -271,17 +292,45 @@
     }
 
     function updateSelectedIds() {
-      const rawValue = currentRecord ? currentRecord.Selections : null;
+      if (!currentRecord) {
+        selectedIds = new Set();
+        return;
+      }
+      let rawValue = null;
+      if (refListColumnId && currentRecord[refListColumnId] !== undefined) {
+        rawValue = currentRecord[refListColumnId];
+      } else if (mappedColumnId && currentRecord[mappedColumnId] !== undefined) {
+        rawValue = currentRecord[mappedColumnId];
+      } else if (currentRecord.Selections !== undefined) {
+        rawValue = currentRecord.Selections;
+      }
       const values = coerceRefListValue(rawValue);
       selectedIds = new Set(values);
     }
 
+    async function syncSelectedIdsFromTable() {
+      if (!tableId || !refListColumnId || !currentRecordId) return;
+      if (currentRecord && currentRecord[refListColumnId] !== undefined) return;
+      try {
+        const table = await grist.docApi.fetchTable(tableId);
+        const ids = table.id || [];
+        const rowIndex = ids.indexOf(currentRecordId);
+        if (rowIndex === -1) return;
+        const columnValues = table[refListColumnId] || [];
+        const rawValue = columnValues[rowIndex];
+        selectedIds = new Set(coerceRefListValue(rawValue));
+      } catch (e) {
+        console.error('Failed to sync selection from table:', e);
+      }
+    }
+
     async function updateSelection() {
-      if (!currentRecordId || !columnId) return;
+      const targetColumnId = refListColumnId || mappedColumnId;
+      if (!currentRecordId || !targetColumnId) return;
       try {
         const table = await grist.selectedTable;
-        const value = Array.from(selectedIds).sort((a, b) => a - b);
-        await table.update({ id: currentRecordId, fields: { [columnId]: value } });
+        const value = ['L', ...Array.from(selectedIds).sort((a, b) => a - b)];
+        await table.update({ id: currentRecordId, fields: { [targetColumnId]: value } });
       } catch (e) {
         console.error('Failed to update selection:', e);
       }
@@ -290,7 +339,7 @@
     function render() {
       const app = document.getElementById('app');
 
-      if (!columnId) {
+      if (!mappedColumnId) {
         app.innerHTML = '<div class="config-message">Select a RefList column to configure the widget.</div>';
         return;
       }
