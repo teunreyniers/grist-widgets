@@ -593,10 +593,13 @@
     function mapStatusLabelToRef(value) {
       if (!statusRefLookup) return null;
       if (value === null || value === undefined) return null;
-      if (typeof value === 'number') return value;
       const label = typeof value === 'string' ? value.trim() : `${value}`.trim();
       if (!label) return null;
-      return statusRefLookup.get(label) ?? null;
+      if (statusRefLookup.has(label)) {
+        return statusRefLookup.get(label);
+      }
+      if (typeof value === 'number') return value;
+      return null;
     }
 
     function extractRefId(value) {
@@ -620,15 +623,13 @@
       if (Array.isArray(value)) {
         return value
           .map(item => {
-            if (typeof item === 'string') {
-              const mapped = mapStatusLabelToRef(item);
-              if (mapped !== null && mapped !== undefined) return mapped;
-            }
+            const mapped = mapStatusLabelToRef(item);
+            if (mapped !== null && mapped !== undefined) return mapped;
             return extractRefId(item);
           })
           .filter(id => typeof id === 'number' && !Number.isNaN(id));
       }
-      if (typeof value === 'string') {
+      if (typeof value === 'string' || typeof value === 'number') {
         const mapped = mapStatusLabelToRef(value);
         if (mapped !== null && mapped !== undefined) return [mapped];
       }
@@ -828,10 +829,8 @@
         if (Array.isArray(option.value)) {
           const mappedList = option.value
             .map(item => {
-              if (typeof item === 'string') {
-                const mapped = mapStatusLabelToRef(item);
-                if (mapped !== null && mapped !== undefined) return mapped;
-              }
+              const mapped = mapStatusLabelToRef(item);
+              if (mapped !== null && mapped !== undefined) return mapped;
               return extractRefId(item);
             })
             .filter(id => typeof id === 'number' && !Number.isNaN(id));
