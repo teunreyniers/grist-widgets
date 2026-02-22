@@ -618,7 +618,15 @@
     function coerceRefListValue(value) {
       if (value === null || value === undefined) return [];
       if (Array.isArray(value)) {
-        return value.map(extractRefId).filter(id => typeof id === 'number' && !Number.isNaN(id));
+        return value
+          .map(item => {
+            if (typeof item === 'string') {
+              const mapped = mapStatusLabelToRef(item);
+              if (mapped !== null && mapped !== undefined) return mapped;
+            }
+            return extractRefId(item);
+          })
+          .filter(id => typeof id === 'number' && !Number.isNaN(id));
       }
       if (typeof value === 'string') {
         const mapped = mapStatusLabelToRef(value);
@@ -817,6 +825,18 @@
         return options;
       }
       return options.map(option => {
+        if (Array.isArray(option.value)) {
+          const mappedList = option.value
+            .map(item => {
+              if (typeof item === 'string') {
+                const mapped = mapStatusLabelToRef(item);
+                if (mapped !== null && mapped !== undefined) return mapped;
+              }
+              return extractRefId(item);
+            })
+            .filter(id => typeof id === 'number' && !Number.isNaN(id));
+          return { ...option, value: mappedList };
+        }
         const mapped = mapStatusLabelToRef(option.value);
         if (mapped === null || mapped === undefined) return option;
         return { ...option, value: mapped };
