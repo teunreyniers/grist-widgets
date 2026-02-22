@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ref List Multi-Select Widget</title>
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <style>
+    :root {
+      --background: #ffffff;
+      --foreground: #0f172a;
+      --card: #ffffff;
+      --card-foreground: #0f172a;
+      --muted: #f1f5f9;
+      --muted-foreground: #64748b;
+      --border: #e2e8f0;
+      --accent: #f1f5f9;
+      --primary: #0f172a;
+      --primary-foreground: #f8fafc;
+      --ring: #94a3b8;
+      --radius: 0.5rem;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+      background: var(--background);
+      color: var(--foreground);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    #app {
+      padding: 16px;
+      max-width: 100%;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      padding: 12px 16px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .header-title {
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .header-count {
+      font-size: 13px;
+      color: var(--muted-foreground);
+    }
+
+    .list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      transition: box-shadow 0.15s ease;
+    }
+
+    .item:hover {
+      box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+    }
+
+    .item label {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      cursor: pointer;
+    }
+
+    .item input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--primary);
+    }
+
+    .item-text {
+      font-size: 14px;
+      color: var(--foreground);
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .config-message {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted-foreground);
+      text-align: center;
+      padding: 48px 24px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="config-message">Loading...</div>
+  </div>
+
+  <script>
+    let tableId = null;
+    let columnId = null;
+    let columnType = null;
+    let refTableId = null;
+    let displayColId = null;
+    let refRecords = [];
+    let currentRecord = null;
+    let currentRecordId = null;
+    let selectedIds = new Set();
+    let isLoadingRefRecords = false;
+
+    grist.ready({
+      columns: [
+        { name: 'Selections', title: 'Selections', type: 'RefList' }
+      ],
+      requiredAccess: 'full'
+    });
+
+    grist.onRecord((record, mappings) => {
+      currentRecord = record || null;
+      currentRecordId = record && typeof record.id === 'number' ? record.id : null;
+      if (mappings) {
+        columnId = mappings.Selections || null;
+      }
+      updateSelectedIds();
+      if (tableId && columnId) {
+        refreshColumnMeta();
+      }
+      render();
+    });
+
+    grist.on('message', (msg) => {
+      if (msg.tableId) {
+        tableId = msg.tableId;
+        if (columnId) {
+          refreshColumnMeta();
+        }
+      }
+    });
+
+    function getRefTableIdFromType(type) {
+      if (!type) return null;
+      const match = type.match(/^RefList:([^:]+)$/);
+      return match ? match[1] : null;
+    }
+
+    function getDisplayColId(tables, columns, refTableId) {
+      const tableRefIndex = tables.tableId.indexOf(refTableId);
+      const tableRef = tableRefIndex === -1 ? null : tables.id[tableRefIndex];
+      if (!tableRef) return null;
+
+      let displayColId = null;
+      if (tables.displayCol && tables.displayCol[tableRefIndex]) {
+        const displayRef = tables.displayCol[tableRefIndex];
+        const displayColIndex = columns.id.indexOf(displayRef);
+        if (displayColIndex !== -1) {
+          displayColId = columns.colId[displayColIndex];
+        }
+      }
+
+      if (!displayColId && Array.isArray(columns.isDisplayCol)) {
+        const displayColIndex = columns.id.findIndex((id, i) =>
+          columns.parentId[i] === tableRef && columns.isDisplayCol[i]
+        );
+        if (displayColIndex !== -1) {
+          displayColId = columns.colId[displayColIndex];
+        }
+      }
+
+      if (!displayColId) {
+        const firstColIndex = columns.id.findIndex((id, i) => columns.parentId[i] === tableRef);
+        if (firstColIndex !== -1) {
+          displayColId = columns.colId[firstColIndex];
+        }
+      }
+
+      return displayColId;
+    }
+
+    async function refreshColumnMeta() {
+      if (!tableId || !columnId || isLoadingRefRecords) return;
+      isLoadingRefRecords = true;
+      try {
+        const tables = await grist.docApi.fetchTable('_grist_Tables');
+        const columns = await grist.docApi.fetchTable('_grist_Tables_column');
+
+        const tableRefIndex = tables.tableId.indexOf(tableId);
+        const tableRef = tableRefIndex === -1 ? null : tables.id[tableRefIndex];
+        if (!tableRef) return;
+
+        const colIndex = columns.id.findIndex((id, i) =>
+          columns.parentId[i] === tableRef && columns.colId[i] === columnId
+        );
+        if (colIndex === -1) return;
+
+        columnType = columns.type[colIndex] || null;
+        if (!columnType || !columnType.startsWith('RefList')) return;
+
+        refTableId = getRefTableIdFromType(columnType);
+        if (!refTableId) return;
+
+        displayColId = getDisplayColId(tables, columns, refTableId);
+        const refTable = await grist.docApi.fetchTable(refTableId);
+        const ids = refTable.id || [];
+        const labels = displayColId ? (refTable[displayColId] || []) : [];
+        refRecords = ids.map((id, i) => ({
+          id,
+          label: labels[i] !== undefined && labels[i] !== null ? `${labels[i]}` : `${id}`
+        }));
+      } catch (e) {
+        console.error('Failed to load ref records:', e);
+      } finally {
+        isLoadingRefRecords = false;
+        render();
+      }
+    }
+
+    function extractRefId(value) {
+      if (value === null || value === undefined) return null;
+      if (typeof value === 'number') return value;
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        const num = Number(trimmed);
+        return Number.isNaN(num) ? null : num;
+      }
+      if (typeof value === 'object') {
+        if (value.id !== undefined) return extractRefId(value.id);
+        if (value.value !== undefined) return extractRefId(value.value);
+      }
+      return null;
+    }
+
+    function coerceRefListValue(value) {
+      if (value === null || value === undefined) return [];
+      if (Array.isArray(value)) {
+        return value
+          .map(item => extractRefId(item))
+          .filter(id => typeof id === 'number' && !Number.isNaN(id));
+      }
+      const id = extractRefId(value);
+      return id === null ? [] : [id];
+    }
+
+    function updateSelectedIds() {
+      const rawValue = currentRecord ? currentRecord.Selections : null;
+      const values = coerceRefListValue(rawValue);
+      selectedIds = new Set(values);
+    }
+
+    async function updateSelection() {
+      if (!currentRecordId || !columnId) return;
+      try {
+        const table = await grist.selectedTable;
+        const value = Array.from(selectedIds).sort((a, b) => a - b);
+        await table.update({ id: currentRecordId, fields: { [columnId]: value } });
+      } catch (e) {
+        console.error('Failed to update selection:', e);
+      }
+    }
+
+    function render() {
+      const app = document.getElementById('app');
+
+      if (!columnId) {
+        app.innerHTML = '<div class="config-message">Select a RefList column to configure the widget.</div>';
+        return;
+      }
+
+      if (columnType && !columnType.startsWith('RefList')) {
+        app.innerHTML = '<div class="config-message">The selected column must be a RefList.</div>';
+        return;
+      }
+
+      if (!currentRecordId) {
+        app.innerHTML = '<div class="config-message">Select a record to edit its list.</div>';
+        return;
+      }
+
+      if (!refTableId) {
+        app.innerHTML = '<div class="config-message">Ref table not found for this column.</div>';
+        return;
+      }
+
+      if (!refRecords.length) {
+        app.innerHTML = '<div class="config-message">No records in the reference table.</div>';
+        return;
+      }
+
+      const header = `
+        <div class="header">
+          <div class="header-title">Reference Records</div>
+          <div class="header-count">${selectedIds.size} selected</div>
+        </div>
+      `;
+
+      const listHtml = refRecords.map(record => {
+        const checked = selectedIds.has(record.id) ? 'checked' : '';
+        return `
+          <div class="item">
+            <label>
+              <input type="checkbox" data-ref-id="${record.id}" ${checked}>
+              <span class="item-text">${escapeHtml(record.label)}</span>
+            </label>
+          </div>
+        `;
+      }).join('');
+
+      app.innerHTML = header + `<div class="list">${listHtml}</div>`;
+      bindSelectionEvents();
+    }
+
+    function bindSelectionEvents() {
+      const app = document.getElementById('app');
+      app.onchange = (event) => {
+        const input = event.target.closest('input[data-ref-id]');
+        if (!input) return;
+        const refId = Number(input.dataset.refId);
+        if (Number.isNaN(refId)) return;
+        if (input.checked) {
+          selectedIds.add(refId);
+        } else {
+          selectedIds.delete(refId);
+        }
+        updateSelection();
+        render();
+      };
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text === null || text === undefined ? '' : `${text}`;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
