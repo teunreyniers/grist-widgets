@@ -317,6 +317,7 @@
     let choiceStyles = {};
     let tableId = null;
     let statusColumnId = null;
+    let statusColumnType = null;
     let currentWeekStart = getWeekStart(new Date());
 
     function getWeekStart(date) {
@@ -420,18 +421,24 @@
         
         if (response.ok) {
           const data = await response.json();
+          const colType = data.type || null;
+          let choices = [];
+          let styles = {};
           const widgetOptions = data.widgetOptions;
           if (widgetOptions) {
-            const options = typeof widgetOptions === 'string' 
-              ? JSON.parse(widgetOptions) 
-              : widgetOptions;
-            if (options.choices && Array.isArray(options.choices)) {
-              return {
-                choices: options.choices,
-                styles: options.choiceOptions || {}
-              };
+            try {
+              const options = typeof widgetOptions === 'string' 
+                ? JSON.parse(widgetOptions) 
+                : widgetOptions;
+              if (options.choices && Array.isArray(options.choices)) {
+                choices = options.choices;
+                styles = options.choiceOptions || {};
+              }
+            } catch (e) {
+              console.warn('Failed to parse widget options from API:', e);
             }
           }
+          return { choices, styles, type: colType };
         }
       } catch (e) {
         console.error('Failed to fetch via API:', e);
@@ -451,18 +458,24 @@
         if (colIndex === -1) return null;
 
         const colType = columns.type[colIndex];
-        if (!colType || !colType.startsWith('Choice')) return null;
+        if (!colType) return null;
 
+        let choices = [];
+        let styles = {};
         const widgetOptions = columns.widgetOptions[colIndex];
-        if (!widgetOptions) return null;
-
-        const options = JSON.parse(widgetOptions);
-        if (options.choices && Array.isArray(options.choices)) {
-          return {
-            choices: options.choices,
-            styles: options.choiceOptions || {}
-          };
+        if (widgetOptions) {
+          try {
+            const options = JSON.parse(widgetOptions);
+            if (options.choices && Array.isArray(options.choices)) {
+              choices = options.choices;
+              styles = options.choiceOptions || {};
+            }
+          } catch (e) {
+            console.warn('Failed to parse widget options from metadata:', e);
+          }
         }
+
+        return { choices, styles, type: colType };
       } catch (e) {
         console.error('Failed to fetch choice styles:', e);
       }
@@ -477,23 +490,59 @@
       const mainResult = await fetchChoiceStyles(statusColumnId);
       
       if (mainResult) {
-        // Check if we have actual styles, if not try fallback from column data
+        statusColumnType = mainResult.type || null;
         const hasStyles = Object.keys(mainResult.styles).length > 0;
-        
-        if (hasStyles) {
-          choiceStyles = mainResult.styles;
-        } else {
-          choiceStyles = {};
-        }
+        choiceStyles = hasStyles ? mainResult.styles : {};
         render();
-        return;
       }
+    }
+
+    function extractRefId(value) {
+      if (value === null || value === undefined) return null;
+      if (typeof value === 'number') return value;
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        const num = Number(trimmed);
+        return Number.isNaN(num) ? null : num;
+      }
+      if (typeof value === 'object') {
+        if (value.id !== undefined) return extractRefId(value.id);
+        if (value.value !== undefined) return extractRefId(value.value);
+      }
+      return null;
+    }
+
+    function coerceRefListValue(value) {
+      if (value === null || value === undefined) return [];
+      if (Array.isArray(value)) {
+        return value.map(extractRefId).filter(id => typeof id === 'number' && !Number.isNaN(id));
+      }
+      const id = extractRefId(value);
+      return id === null ? [] : [id];
+    }
+
+    function coerceRefValue(value) {
+      if (value === null || value === undefined) return null;
+      if (Array.isArray(value)) {
+        const id = extractRefId(value[0]);
+        return id === null ? null : id;
+      }
+      const id = extractRefId(value);
+      return id === null ? null : id;
+    }
+
+    function coerceStatusValue(value) {
+      if (!statusColumnType) return value;
+      if (statusColumnType.startsWith('RefList')) return coerceRefListValue(value);
+      if (statusColumnType.startsWith('Ref')) return coerceRefValue(value);
+      return value;
     }
 
     async function changeStatus(rowId, newStatus) {
       try {
         const table = await grist.selectedTable;
-        await table.update({ id: rowId, fields: { Status: newStatus } });
+        await table.update({ id: rowId, fields: { Status: coerceStatusValue(newStatus) } });
       } catch (e) {
         console.error('Failed to update status:', e);
       }
@@ -504,7 +553,7 @@
         const table = await grist.selectedTable;
         const weekRecords = records.filter(r => isInCurrentWeek(r.Date));
         for (const record of weekRecords) {
-          await table.update({ id: record.id, fields: { Status: newStatus } });
+          await table.update({ id: record.id, fields: { Status: coerceStatusValue(newStatus) } });
         }
         render();
       } catch (e) {
@@ -581,6 +630,7 @@
     }
 
     function serializeOptionValue(value) {
+      if (value === undefined) return 'null';
       if (value instanceof Date) {
         return JSON.stringify({ __type: 'Date', value: value.toISOString() });
       }
@@ -589,11 +639,15 @@
 
     function parseOptionValue(value) {
       if (!value) return null;
-      const parsed = JSON.parse(value);
-      if (parsed && typeof parsed === 'object' && parsed.__type === 'Date') {
-        return new Date(parsed.value);
+      try {
+        const parsed = JSON.parse(value);
+        if (parsed && typeof parsed === 'object' && parsed.__type === 'Date') {
+          return new Date(parsed.value);
+        }
+        return parsed;
+      } catch (e) {
+        return null;
       }
-      return parsed;
     }
 
     function encodeHtmlAttribute(value) {
