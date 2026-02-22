@@ -580,9 +580,47 @@
       return JSON.stringify(a) === JSON.stringify(b);
     }
 
-    function encodeJsValue(value) {
-      if (value === undefined) return 'null';
+    function serializeOptionValue(value) {
+      if (value instanceof Date) {
+        return JSON.stringify({ __type: 'Date', value: value.toISOString() });
+      }
       return JSON.stringify(value);
+    }
+
+    function parseOptionValue(value) {
+      if (!value) return null;
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && parsed.__type === 'Date') {
+        return new Date(parsed.value);
+      }
+      return parsed;
+    }
+
+    function encodeHtmlAttribute(value) {
+      return `${value}`
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    function bindStatusButtons() {
+      const app = document.getElementById('app');
+      app.onclick = (event) => {
+        const button = event.target.closest('button[data-action]');
+        if (!button) return;
+        const value = parseOptionValue(button.dataset.value);
+        if (button.dataset.action === 'week') {
+          changeWeekStatus(value);
+          return;
+        }
+        if (button.dataset.action === 'status') {
+          const rowId = Number(button.dataset.rowId);
+          if (Number.isNaN(rowId)) return;
+          changeStatus(rowId, value);
+        }
+      };
     }
 
     function getRecordOptions(record) {
@@ -612,8 +650,9 @@
         const textColor = style.textColor || 'var(--muted-foreground)';
         return `
           <button class="status-btn" 
-            style="background: ${bgColor}; color: ${textColor};"
-            onclick="changeWeekStatus(${encodeJsValue(option.value)})">
+            data-action="week"
+            data-value="${encodeHtmlAttribute(serializeOptionValue(option.value))}"
+            style="background: ${bgColor}; color: ${textColor};">
             ${escapeHtml(getOptionLabel(option))}
           </button>
         `;
@@ -639,6 +678,7 @@
 
       if (filteredRecords.length === 0) {
         app.innerHTML = weekNav + '<div class="no-records">No records for this week</div>';
+        bindStatusButtons();
         return;
       }
 
@@ -664,8 +704,10 @@
                 const activeClass = isActive ? 'active' : '';
                 return `
                   <button class="status-btn ${activeClass}" 
-                    style="background: ${bgColor}; color: ${textColor};"
-                    onclick="changeStatus(${record.id}, ${encodeJsValue(option.value)})">
+                    data-action="status"
+                    data-row-id="${record.id}"
+                    data-value="${encodeHtmlAttribute(serializeOptionValue(option.value))}"
+                    style="background: ${bgColor}; color: ${textColor};">
                     ${escapeHtml(getOptionLabel(option))}
                   </button>
                 `;
@@ -674,6 +716,7 @@
           </div>
         `;
       }).join('') + '</div>';
+      bindStatusButtons();
     }
 
     function escapeHtml(text) {
