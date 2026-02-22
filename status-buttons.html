@@ -206,6 +206,8 @@
     .status-btn.active {
       font-weight: 600;
       box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+      background: var(--primary);
+      color: var(--primary-foreground);
     }
 
     .no-records, .config-message {
@@ -314,14 +316,11 @@
 
   <script>
     let records = [];
-    let choiceStyles = {};
+    let statusChoices = [];
     let tableId = null;
     let statusColumnId = null;
     let statusColumnType = null;
-    let statusRefLookup = null;
-    let statusRefTableId = null;
-    let statusRefDisplayColId = null;
-    let loggedMissingRefLookup = false;
+    let dateColumnId = null;
     let currentWeekStart = getWeekStart(new Date());
 
     function getWeekStart(date) {
@@ -364,6 +363,7 @@
     }
 
     function isInCurrentWeek(dateValue) {
+      if (!dateColumnId) return true;
       if (dateValue === null || dateValue === undefined) return false;
       
       let recordDate;
@@ -386,10 +386,9 @@
 
     grist.ready({
       columns: [
-        { name: 'Title', title: 'Title', type: 'Text' },
-        { name: 'Status', title: 'Status', type: 'Any' },
-        { name: 'Options', title: 'Options', type: 'ChoiceList', description: 'Per-row status options' },
-        { name: 'Date', title: 'Date', type: 'Date,DateTime', description: 'Date or DateTime column' },
+        { name: 'Title', title: 'Title', type: 'Text', optional: true },
+        { name: 'Status', title: 'Status', type: 'RefList' },
+        { name: 'Date', title: 'Date', type: 'Date,DateTime', description: 'Date or DateTime column', optional: true },
         { name: 'Details', title: 'Details', type: 'Text', optional: true }
       ],
       requiredAccess: 'full'
@@ -398,9 +397,12 @@
     grist.onRecords((data, mappings) => {
       records = grist.mapColumnNames(data) || [];
       console.info('Records updated', { recordCount: records.length, mappings });
-      if (mappings && mappings.Status) {
-        statusColumnId = mappings.Status;
-        fetchStatusChoices();
+      if (mappings) {
+        statusColumnId = mappings.Status || null;
+        dateColumnId = mappings.Date || null;
+        if (statusColumnId) {
+          fetchStatusChoices();
+        }
       }
       render();
     });
@@ -415,10 +417,44 @@
       }
     });
 
-    async function fetchChoiceStyles(columnId) {
-      if (!columnId || !tableId) return null;
+    function getDisplayColId(tables, columns, refTableId) {
+      const tableRefIndex = tables.tableId.indexOf(refTableId);
+      const tableRef = tableRefIndex === -1 ? null : tables.id[tableRefIndex];
+      if (!tableRef) return null;
 
-      console.info('Fetching choice styles', { tableId, columnId });
+      let displayColId = null;
+      if (tables.displayCol && tables.displayCol[tableRefIndex]) {
+        const displayRef = tables.displayCol[tableRefIndex];
+        const displayColIndex = columns.id.indexOf(displayRef);
+        if (displayColIndex !== -1) {
+          displayColId = columns.colId[displayColIndex];
+        }
+      }
+
+      if (!displayColId && Array.isArray(columns.isDisplayCol)) {
+        const displayColIndex = columns.id.findIndex((id, i) =>
+          columns.parentId[i] === tableRef && columns.isDisplayCol[i]
+        );
+        if (displayColIndex !== -1) {
+          displayColId = columns.colId[displayColIndex];
+        }
+      }
+
+      if (!displayColId) {
+        const firstColIndex = columns.id.findIndex((id, i) => columns.parentId[i] === tableRef);
+        if (firstColIndex !== -1) {
+          displayColId = columns.colId[firstColIndex];
+        }
+      }
+
+      return displayColId;
+    }
+
+    async function fetchStatusChoices() {
+      if (!statusColumnId || !tableId) return;
+
+      statusChoices = [];
+      statusColumnType = null;
 
       try {
         const tables = await grist.docApi.fetchTable('_grist_Tables');
@@ -427,71 +463,45 @@
         const tableRefIndex = tables.tableId.indexOf(tableId);
         const tableRef = tableRefIndex === -1 ? null : tables.id[tableRefIndex];
         if (!tableRef) {
-          console.warn('Table reference not found for status choices', { tableId });
-          return null;
+          console.warn('Table reference not found for status column', { tableId });
+          return;
         }
 
         const colIndex = columns.id.findIndex((id, i) =>
-          columns.parentId[i] === tableRef && columns.colId[i] === columnId
+          columns.parentId[i] === tableRef && columns.colId[i] === statusColumnId
         );
         if (colIndex === -1) {
-          console.warn('Column not found for status choices', { tableId, columnId });
-          return null;
+          console.warn('Status column not found', { tableId, statusColumnId });
+          return;
         }
 
-        const colType = columns.type[colIndex];
-        if (!colType) {
-          console.warn('Status column type missing', { tableId, columnId });
-          return null;
+        statusColumnType = columns.type[colIndex] || null;
+        if (!statusColumnType || !statusColumnType.startsWith('RefList')) {
+          console.warn('Status column must be RefList', { statusColumnType });
+          render();
+          return;
         }
 
-        let choices = [];
-        let styles = {};
-        const widgetOptions = columns.widgetOptions[colIndex];
-        if (widgetOptions) {
-          try {
-            const options = JSON.parse(widgetOptions);
-            if (options.choices && Array.isArray(options.choices)) {
-              choices = options.choices;
-              styles = options.choiceOptions || {};
-            }
-          } catch (e) {
-            console.warn('Failed to parse widget options from metadata:', e);
-          }
+        const refTableId = getRefTableIdFromType(statusColumnType);
+        if (!refTableId) {
+          console.warn('Unable to parse ref table id', { statusColumnType });
+          return;
         }
 
-        console.info('Loaded status choices', {
-          tableId,
-          columnId,
-          choiceCount: choices.length,
-          hasStyles: Object.keys(styles).length > 0,
-          colType
+        const displayColId = getDisplayColId(tables, columns, refTableId);
+        const refTable = await grist.docApi.fetchTable(refTableId);
+        const ids = refTable.id || [];
+        const labels = displayColId ? (refTable[displayColId] || []) : [];
+        statusChoices = ids.map((id, i) => {
+          const label = labels[i] !== undefined && labels[i] !== null ? labels[i] : id;
+          return { label: `${label}`, value: id };
         });
-        return { choices, styles, type: colType };
-      } catch (e) {
-        console.error('Failed to fetch choice styles from metadata:', e);
-      }
 
-      return null;
-    }
-
-    async function fetchStatusChoices() {
-      if (!statusColumnId || !tableId) return;
-
-      console.info('Fetching status choices', { tableId, statusColumnId });
-      const mainResult = await fetchChoiceStyles(statusColumnId);
-
-      if (mainResult) {
-        statusColumnType = mainResult.type || null;
-        const hasStyles = Object.keys(mainResult.styles).length > 0;
-        choiceStyles = hasStyles ? mainResult.styles : {};
-        await fetchStatusRefLookup();
-        console.info('Status choices ready', { choiceCount: mainResult.choices.length, hasStyles });
+        console.info('Status choices ready', { choiceCount: statusChoices.length });
         render();
-        return;
+      } catch (e) {
+        console.error('Failed to load status choices:', e);
       }
-
-      console.warn('Status choices unavailable', { tableId, statusColumnId });
     }
 
     function getRefTableIdFromType(type) {
@@ -500,71 +510,6 @@
       return match ? match[2] : null;
     }
 
-    async function fetchStatusRefLookup() {
-      loggedMissingRefLookup = false;
-      statusRefLookup = null;
-      statusRefTableId = null;
-      statusRefDisplayColId = null;
-      if (!statusColumnType || !statusColumnType.startsWith('Ref')) return;
-
-      const refTableId = getRefTableIdFromType(statusColumnType);
-      if (!refTableId) {
-        console.warn('Unable to parse ref table id', { statusColumnType });
-        return;
-      }
-
-      try {
-        const tables = await grist.docApi.fetchTable('_grist_Tables');
-        const columns = await grist.docApi.fetchTable('_grist_Tables_column');
-
-        const tableRefIndex = tables.tableId.indexOf(refTableId);
-        const tableRef = tableRefIndex === -1 ? null : tables.id[tableRefIndex];
-        if (!tableRef) {
-          console.warn('Ref table not found for status lookup', { refTableId });
-          return;
-        }
-
-        const displayColIndex = columns.id.findIndex((id, i) =>
-          columns.parentId[i] === tableRef && columns.isDisplayCol[i]
-        );
-        if (displayColIndex === -1) {
-          console.warn('Display column not found for ref table', { refTableId });
-          return;
-        }
-
-        const displayColId = columns.colId[displayColIndex];
-        const refTable = await grist.docApi.fetchTable(refTableId);
-        const ids = refTable.id || [];
-        const labels = refTable[displayColId] || [];
-        const lookup = new Map();
-        ids.forEach((id, i) => {
-          const label = labels[i];
-          if (label !== null && label !== undefined) {
-            lookup.set(`${label}`, id);
-          }
-        });
-
-        statusRefLookup = lookup;
-        statusRefTableId = refTableId;
-        statusRefDisplayColId = displayColId;
-        console.info('Loaded status ref lookup', {
-          refTableId,
-          displayColId,
-          entryCount: lookup.size
-        });
-      } catch (e) {
-        console.error('Failed to load status ref lookup:', e);
-      }
-    }
-
-    function mapStatusLabelToRef(value) {
-      if (!statusRefLookup) return null;
-      if (value === null || value === undefined) return null;
-      if (typeof value === 'number') return value;
-      const label = typeof value === 'string' ? value.trim() : `${value}`.trim();
-      if (!label) return null;
-      return statusRefLookup.get(label) ?? null;
-    }
 
     function extractRefId(value) {
       if (value === null || value === undefined) return null;
@@ -587,39 +532,14 @@
       if (Array.isArray(value)) {
         return value.map(extractRefId).filter(id => typeof id === 'number' && !Number.isNaN(id));
       }
-      if (typeof value === 'string') {
-        const mapped = mapStatusLabelToRef(value);
-        if (mapped !== null && mapped !== undefined) return [mapped];
-      }
       const id = extractRefId(value);
       return id === null ? [] : [id];
-    }
-
-    function coerceRefValue(value) {
-      if (value === null || value === undefined) return null;
-      if (Array.isArray(value)) {
-        const id = extractRefId(value[0]);
-        return id === null ? null : id;
-      }
-      if (typeof value === 'string') {
-        const mapped = mapStatusLabelToRef(value);
-        if (mapped !== null && mapped !== undefined) return mapped;
-      }
-      const id = extractRefId(value);
-      return id === null ? null : id;
-    }
-
-    function coerceStatusValue(value) {
-      if (!statusColumnType) return value;
-      if (statusColumnType.startsWith('RefList')) return coerceRefListValue(value);
-      if (statusColumnType.startsWith('Ref')) return coerceRefValue(value);
-      return value;
     }
 
     async function changeStatus(rowId, newStatus) {
       try {
         const table = await grist.selectedTable;
-        await table.update({ id: rowId, fields: { Status: coerceStatusValue(newStatus) } });
+        await table.update({ id: rowId, fields: { Status: coerceRefListValue(newStatus) } });
       } catch (e) {
         console.error('Failed to update status:', e);
       }
@@ -630,7 +550,7 @@
         const table = await grist.selectedTable;
         const weekRecords = records.filter(r => isInCurrentWeek(r.Date));
         for (const record of weekRecords) {
-          await table.update({ id: record.id, fields: { Status: coerceStatusValue(newStatus) } });
+          await table.update({ id: record.id, fields: { Status: coerceRefListValue(newStatus) } });
         }
         render();
       } catch (e) {
@@ -638,65 +558,10 @@
       }
     }
 
-    function normalizeOptionItem(option) {
-      if (option === null || option === undefined) return null;
-      if (typeof option === 'object') {
-        const rawLabel = option.label ?? option.name ?? option.text ?? option.display ?? option.value;
-        const rawValue = option.value ?? option.name ?? option.text ?? option.display ?? option.label;
-        if (rawLabel === undefined && rawValue === undefined) return null;
-        const label = typeof rawLabel === 'string' ? rawLabel.trim() : `${rawLabel}`.trim();
-        let value = rawValue;
-        if (typeof value === 'string') {
-          value = value.trim();
-        }
-        return { label, value };
-      }
-      return { label: `${option}`.trim(), value: option };
-    }
-
-    function normalizeOptions(value) {
-      if (value === null || value === undefined) return [];
-      if (Array.isArray(value)) {
-        return value.map(normalizeOptionItem).filter(option => option && option.label);
-      }
-      if (typeof value === 'string') {
-        const trimmed = value.trim();
-        if (!trimmed) return [];
-        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-          try {
-            const parsed = JSON.parse(trimmed);
-            if (Array.isArray(parsed)) {
-              return parsed.map(normalizeOptionItem).filter(option => option && option.label);
-            }
-          } catch (e) {
-            console.warn('Failed to parse Options JSON, falling back to commas:', e);
-          }
-        }
-        return trimmed.split(',').map(option => normalizeOptionItem(option)).filter(option => option && option.label);
-      }
-      return [normalizeOptionItem(value)].filter(option => option && option.label);
-    }
-
-    function getOptionKey(option) {
-      if (!option) return '';
-      const rawValue = option.value !== undefined ? option.value : option.label;
-      if (rawValue === undefined) return '';
-      if (rawValue instanceof Date) return rawValue.toISOString();
-      if (typeof rawValue === 'object') return JSON.stringify(rawValue);
-      return `${rawValue}`;
-    }
-
     function getOptionLabel(option) {
       if (!option) return '';
       if (option.label === null || option.label === undefined) return '';
       return `${option.label}`;
-    }
-
-    function getChoiceStyle(option) {
-      if (!option) return {};
-      const valueKey = option.value !== undefined ? `${option.value}` : '';
-      const labelKey = option.label !== undefined ? `${option.label}` : '';
-      return choiceStyles[valueKey] || choiceStyles[labelKey] || {};
     }
 
     function areValuesEqual(a, b) {
@@ -759,51 +624,25 @@
       };
     }
 
-    function getRecordOptions(record) {
-      const options = normalizeOptions(record.Options);
-      if (!statusColumnType || !statusColumnType.startsWith('Ref')) {
-        return options;
-      }
-      if (!statusRefLookup) {
-        if (!loggedMissingRefLookup) {
-          console.warn('Status ref lookup unavailable; using raw option values', { statusColumnType });
-          loggedMissingRefLookup = true;
-        }
-        return options;
-      }
-      return options.map(option => {
-        const mapped = mapStatusLabelToRef(option.value);
-        if (mapped === null || mapped === undefined) return option;
-        return { ...option, value: mapped };
-      });
-    }
-
-    function getWeekOptions(weekRecords) {
-      if (!weekRecords.length) return [];
-      const baseOptions = getRecordOptions(weekRecords[0]);
-      let intersection = new Set(baseOptions.map(getOptionKey));
-      for (const record of weekRecords.slice(1)) {
-        const options = new Set(getRecordOptions(record).map(getOptionKey));
-        intersection = new Set([...intersection].filter(option => options.has(option)));
-        if (intersection.size === 0) break;
-      }
-      return baseOptions.filter(option => intersection.has(getOptionKey(option)));
+    function getRecordOptions() {
+      return statusChoices;
     }
 
     function render() {
       const app = document.getElementById('app');
 
+      if (statusColumnType && !statusColumnType.startsWith('RefList')) {
+        app.innerHTML = '<div class="config-message">Status column must be a RefList.</div>';
+        return;
+      }
+
       const filteredRecords = records.filter(r => isInCurrentWeek(r.Date));
-      const weekStatuses = getWeekOptions(filteredRecords);
+      const weekStatuses = statusChoices;
       const weekStatusButtons = weekStatuses.map(option => {
-        const style = getChoiceStyle(option);
-        const bgColor = style.fillColor || 'var(--secondary)';
-        const textColor = style.textColor || 'var(--muted-foreground)';
         return `
           <button class="status-btn" 
             data-action="week"
-            data-value="${encodeHtmlAttribute(serializeOptionValue(option.value))}"
-            style="background: ${bgColor}; color: ${textColor};">
+            data-value="${encodeHtmlAttribute(serializeOptionValue(option.value))}">
             ${escapeHtml(getOptionLabel(option))}
           </button>
         `;
@@ -837,7 +676,7 @@
         const title = record.Title || '(no title)';
         const details = record.Details || '';
         const currentStatus = record.Status;
-        const recordOptions = getRecordOptions(record);
+        const recordOptions = getRecordOptions();
         const detailsHtml = details ? `<div class="details">${escapeHtml(details)}</div>` : '';
 
         return `
@@ -848,17 +687,13 @@
             </div>
             <div class="buttons">
               ${recordOptions.map(option => {
-                const style = getChoiceStyle(option);
                 const isActive = areValuesEqual(option.value, currentStatus);
-                const bgColor = isActive ? (style.fillColor || 'var(--primary)') : 'var(--secondary)';
-                const textColor = isActive ? (style.textColor || 'var(--primary-foreground)') : 'var(--muted-foreground)';
                 const activeClass = isActive ? 'active' : '';
                 return `
                   <button class="status-btn ${activeClass}" 
                     data-action="status"
                     data-row-id="${record.id}"
-                    data-value="${encodeHtmlAttribute(serializeOptionValue(option.value))}"
-                    style="background: ${bgColor}; color: ${textColor};">
+                    data-value="${encodeHtmlAttribute(serializeOptionValue(option.value))}">
                     ${escapeHtml(getOptionLabel(option))}
                   </button>
                 `;
