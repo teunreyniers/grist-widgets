@@ -382,7 +382,7 @@
     grist.ready({
       columns: [
         { name: 'Title', title: 'Title', type: 'Text' },
-        { name: 'Status', title: 'Status', type: 'Choice' },
+        { name: 'Status', title: 'Status', type: 'Any' },
         { name: 'Options', title: 'Options', type: 'ChoiceList', description: 'Per-row status options' },
         { name: 'Date', title: 'Date', type: 'Date,DateTime', description: 'Date or DateTime column' },
         { name: 'Details', title: 'Details', type: 'Text', optional: true }
@@ -515,19 +515,23 @@
     function normalizeOptionItem(option) {
       if (option === null || option === undefined) return null;
       if (typeof option === 'object') {
-        if (option.value !== undefined) return `${option.value}`.trim();
-        if (option.label !== undefined) return `${option.label}`.trim();
-        if (option.name !== undefined) return `${option.name}`.trim();
-        if (option.text !== undefined) return `${option.text}`.trim();
-        if (option.display !== undefined) return `${option.display}`.trim();
+        const rawLabel = option.label ?? option.name ?? option.text ?? option.display ?? option.value;
+        const rawValue = option.value ?? option.name ?? option.text ?? option.display ?? option.label;
+        if (rawLabel === undefined && rawValue === undefined) return null;
+        const label = typeof rawLabel === 'string' ? rawLabel.trim() : `${rawLabel}`.trim();
+        let value = rawValue;
+        if (typeof value === 'string') {
+          value = value.trim();
+        }
+        return { label, value };
       }
-      return `${option}`.trim();
+      return { label: `${option}`.trim(), value: option };
     }
 
     function normalizeOptions(value) {
       if (value === null || value === undefined) return [];
       if (Array.isArray(value)) {
-        return value.map(normalizeOptionItem).filter(Boolean);
+        return value.map(normalizeOptionItem).filter(option => option && option.label);
       }
       if (typeof value === 'string') {
         const trimmed = value.trim();
@@ -536,15 +540,49 @@
           try {
             const parsed = JSON.parse(trimmed);
             if (Array.isArray(parsed)) {
-              return parsed.map(normalizeOptionItem).filter(Boolean);
+              return parsed.map(normalizeOptionItem).filter(option => option && option.label);
             }
           } catch (e) {
             console.warn('Failed to parse Options JSON, falling back to commas:', e);
           }
         }
-        return trimmed.split(',').map(option => option.trim()).filter(Boolean);
+        return trimmed.split(',').map(option => normalizeOptionItem(option)).filter(option => option && option.label);
       }
-      return [normalizeOptionItem(value)].filter(Boolean);
+      return [normalizeOptionItem(value)].filter(option => option && option.label);
+    }
+
+    function getOptionKey(option) {
+      if (!option) return '';
+      const rawValue = option.value !== undefined ? option.value : option.label;
+      if (rawValue === undefined) return '';
+      if (rawValue instanceof Date) return rawValue.toISOString();
+      if (typeof rawValue === 'object') return JSON.stringify(rawValue);
+      return `${rawValue}`;
+    }
+
+    function getOptionLabel(option) {
+      if (!option) return '';
+      if (option.label === null || option.label === undefined) return '';
+      return `${option.label}`;
+    }
+
+    function getChoiceStyle(option) {
+      if (!option) return {};
+      const valueKey = option.value !== undefined ? `${option.value}` : '';
+      const labelKey = option.label !== undefined ? `${option.label}` : '';
+      return choiceStyles[valueKey] || choiceStyles[labelKey] || {};
+    }
+
+    function areValuesEqual(a, b) {
+      if (a === b) return true;
+      if (a === null || a === undefined || b === null || b === undefined) return false;
+      if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime();
+      return JSON.stringify(a) === JSON.stringify(b);
+    }
+
+    function encodeJsValue(value) {
+      if (value === undefined) return 'null';
+      return JSON.stringify(value);
     }
 
     function getRecordOptions(record) {
@@ -553,13 +591,14 @@
 
     function getWeekOptions(weekRecords) {
       if (!weekRecords.length) return [];
-      let intersection = new Set(getRecordOptions(weekRecords[0]));
+      const baseOptions = getRecordOptions(weekRecords[0]);
+      let intersection = new Set(baseOptions.map(getOptionKey));
       for (const record of weekRecords.slice(1)) {
-        const options = new Set(getRecordOptions(record));
+        const options = new Set(getRecordOptions(record).map(getOptionKey));
         intersection = new Set([...intersection].filter(option => options.has(option)));
         if (intersection.size === 0) break;
       }
-      return Array.from(intersection);
+      return baseOptions.filter(option => intersection.has(getOptionKey(option)));
     }
 
     function render() {
@@ -567,15 +606,15 @@
 
       const filteredRecords = records.filter(r => isInCurrentWeek(r.Date));
       const weekStatuses = getWeekOptions(filteredRecords);
-      const weekStatusButtons = weekStatuses.map(status => {
-        const style = choiceStyles[status] || {};
+      const weekStatusButtons = weekStatuses.map(option => {
+        const style = getChoiceStyle(option);
         const bgColor = style.fillColor || 'var(--secondary)';
         const textColor = style.textColor || 'var(--muted-foreground)';
         return `
           <button class="status-btn" 
             style="background: ${bgColor}; color: ${textColor};"
-            onclick="changeWeekStatus('${escapeJs(status)}')">
-            ${escapeHtml(status)}
+            onclick="changeWeekStatus(${encodeJsValue(option.value)})">
+            ${escapeHtml(getOptionLabel(option))}
           </button>
         `;
       }).join('');
@@ -606,7 +645,7 @@
       app.innerHTML = weekNav + '<div class="records-container">' + filteredRecords.map(record => {
         const title = record.Title || '(no title)';
         const details = record.Details || '';
-        const currentStatus = record.Status || '';
+        const currentStatus = record.Status;
         const recordOptions = getRecordOptions(record);
         const detailsHtml = details ? `<div class="details">${escapeHtml(details)}</div>` : '';
 
@@ -617,17 +656,17 @@
               ${detailsHtml}
             </div>
             <div class="buttons">
-              ${recordOptions.map(status => {
-                const style = choiceStyles[status] || {};
-                const isActive = status === currentStatus;
+              ${recordOptions.map(option => {
+                const style = getChoiceStyle(option);
+                const isActive = areValuesEqual(option.value, currentStatus);
                 const bgColor = isActive ? (style.fillColor || 'var(--primary)') : 'var(--secondary)';
                 const textColor = isActive ? (style.textColor || 'var(--primary-foreground)') : 'var(--muted-foreground)';
                 const activeClass = isActive ? 'active' : '';
                 return `
                   <button class="status-btn ${activeClass}" 
                     style="background: ${bgColor}; color: ${textColor};"
-                    onclick="changeStatus(${record.id}, '${escapeJs(status)}')">
-                    ${escapeHtml(status)}
+                    onclick="changeStatus(${record.id}, ${encodeJsValue(option.value)})">
+                    ${escapeHtml(getOptionLabel(option))}
                   </button>
                 `;
               }).join('')}
@@ -639,12 +678,8 @@
 
     function escapeHtml(text) {
       const div = document.createElement('div');
-      div.textContent = text;
+      div.textContent = text === null || text === undefined ? '' : `${text}`;
       return div.innerHTML;
-    }
-
-    function escapeJs(text) {
-      return text.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     }
   </script>
 </body>
