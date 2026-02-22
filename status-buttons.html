@@ -393,6 +393,7 @@
 
     grist.onRecords((data, mappings) => {
       records = grist.mapColumnNames(data) || [];
+      console.info('Records updated', { recordCount: records.length, mappings });
       if (mappings && mappings.Status) {
         statusColumnId = mappings.Status;
         fetchStatusChoices();
@@ -403,6 +404,7 @@
     grist.on('message', (msg) => {
       if (msg.tableId) {
         tableId = msg.tableId;
+        console.info('Table selected', { tableId });
         if (statusColumnId) {
           fetchStatusChoices();
         }
@@ -412,53 +414,32 @@
     async function fetchChoiceStyles(columnId) {
       if (!columnId || !tableId) return null;
 
-      // Try using REST API with access token (works with read/write access)
-      try {
-        const tokenInfo = await grist.getAccessToken({ readOnly: true });
-        const response = await fetch(`${tokenInfo.baseUrl}/tables/${tableId}/columns/${columnId}`, {
-          headers: { 'Authorization': `Bearer ${tokenInfo.token}` }
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          const colType = data.type || null;
-          let choices = [];
-          let styles = {};
-          const widgetOptions = data.widgetOptions;
-          if (widgetOptions) {
-            try {
-              const options = typeof widgetOptions === 'string' 
-                ? JSON.parse(widgetOptions) 
-                : widgetOptions;
-              if (options.choices && Array.isArray(options.choices)) {
-                choices = options.choices;
-                styles = options.choiceOptions || {};
-              }
-            } catch (e) {
-              console.warn('Failed to parse widget options from API:', e);
-            }
-          }
-          return { choices, styles, type: colType };
-        }
-      } catch (e) {
-        console.error('Failed to fetch via API:', e);
-      }
+      console.info('Fetching choice styles', { tableId, columnId });
 
-      // Fallback to metadata tables (requires full access)
       try {
         const tables = await grist.docApi.fetchTable('_grist_Tables');
         const columns = await grist.docApi.fetchTable('_grist_Tables_column');
 
-        const tableRef = tables.id[tables.tableId.indexOf(tableId)];
-        if (!tableRef) return null;
+        const tableRefIndex = tables.tableId.indexOf(tableId);
+        const tableRef = tableRefIndex === -1 ? null : tables.id[tableRefIndex];
+        if (!tableRef) {
+          console.warn('Table reference not found for status choices', { tableId });
+          return null;
+        }
 
-        const colIndex = columns.id.findIndex((id, i) => 
+        const colIndex = columns.id.findIndex((id, i) =>
           columns.parentId[i] === tableRef && columns.colId[i] === columnId
         );
-        if (colIndex === -1) return null;
+        if (colIndex === -1) {
+          console.warn('Column not found for status choices', { tableId, columnId });
+          return null;
+        }
 
         const colType = columns.type[colIndex];
-        if (!colType) return null;
+        if (!colType) {
+          console.warn('Status column type missing', { tableId, columnId });
+          return null;
+        }
 
         let choices = [];
         let styles = {};
@@ -475,9 +456,16 @@
           }
         }
 
+        console.info('Loaded status choices', {
+          tableId,
+          columnId,
+          choiceCount: choices.length,
+          hasStyles: Object.keys(styles).length > 0,
+          colType
+        });
         return { choices, styles, type: colType };
       } catch (e) {
-        console.error('Failed to fetch choice styles:', e);
+        console.error('Failed to fetch choice styles from metadata:', e);
       }
 
       return null;
@@ -486,15 +474,19 @@
     async function fetchStatusChoices() {
       if (!statusColumnId || !tableId) return;
 
-      // Try to get choices and styles from the main Status column
+      console.info('Fetching status choices', { tableId, statusColumnId });
       const mainResult = await fetchChoiceStyles(statusColumnId);
-      
+
       if (mainResult) {
         statusColumnType = mainResult.type || null;
         const hasStyles = Object.keys(mainResult.styles).length > 0;
         choiceStyles = hasStyles ? mainResult.styles : {};
+        console.info('Status choices ready', { choiceCount: mainResult.choices.length, hasStyles });
         render();
+        return;
       }
+
+      console.warn('Status choices unavailable', { tableId, statusColumnId });
     }
 
     function extractRefId(value) {
