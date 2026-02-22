@@ -682,7 +682,9 @@
         if (typeof value === 'string') {
           value = value.trim();
         }
-        return { label, value };
+        const color = option.color ?? option.fillColor ?? option.backgroundColor ?? null;
+        const textColor = option.textColor ?? option.foregroundColor ?? null;
+        return { label, value, color, textColor };
       }
       return { label: `${option}`.trim(), value: option };
     }
@@ -729,16 +731,26 @@
       if (!option) return {};
       const valueKey = option.value !== undefined ? `${option.value}` : '';
       const labelKey = option.label !== undefined ? `${option.label}` : '';
-      return choiceStyles[valueKey] || choiceStyles[labelKey] || {};
+      const baseStyle = choiceStyles[valueKey] || choiceStyles[labelKey] || {};
+      const fillColor = option.color || option.fillColor || baseStyle.fillColor;
+      const textColor = option.textColor || baseStyle.textColor;
+      return { fillColor, textColor };
+    }
+
+    function normalizeRefListValue(value) {
+      return coerceRefListValue(value)
+        .filter(id => typeof id === 'number' && !Number.isNaN(id))
+        .sort((a, b) => a - b);
     }
 
     function areValuesEqual(a, b) {
       if (a === b) return true;
       if (a === null || a === undefined || b === null || b === undefined) return false;
       if (statusColumnType && statusColumnType.startsWith('RefList')) {
-        const aList = Array.isArray(a) ? a : [a];
-        const bList = Array.isArray(b) ? b : [b];
-        return aList.some(value => bList.some(other => JSON.stringify(value) === JSON.stringify(other)));
+        const aList = normalizeRefListValue(a);
+        const bList = normalizeRefListValue(b);
+        if (aList.length !== bList.length) return false;
+        return aList.every((value, index) => value === bList[index]);
       }
       if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime();
       return JSON.stringify(a) === JSON.stringify(b);
