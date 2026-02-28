@@ -714,7 +714,8 @@
       try {
         const table = await grist.selectedTable;
         const weekRecords = records.filter(r => isInCurrentWeek(r.Date));
-        for (const record of weekRecords) {
+        const supportedRecords = weekRecords.filter(record => isOptionSupported(record, newStatus));
+        for (const record of supportedRecords) {
           await table.update({ id: record.id, fields: { [statusColumnId]: coerceStatusValue(newStatus) } });
         }
         render();
@@ -764,13 +765,20 @@
       return [normalizeOptionItem(value)].filter(option => option && option.label);
     }
 
-    function getOptionKey(option) {
-      if (!option) return '';
-      const rawValue = option.value !== undefined ? option.value : option.label;
+    function getOptionKeyForValue(rawValue) {
       if (rawValue === undefined) return '';
+      if (statusColumnType && statusColumnType.startsWith('RefList') && Array.isArray(rawValue)) {
+        return JSON.stringify(normalizeRefListValue(rawValue));
+      }
       if (rawValue instanceof Date) return rawValue.toISOString();
       if (typeof rawValue === 'object') return JSON.stringify(rawValue);
       return `${rawValue}`;
+    }
+
+    function getOptionKey(option) {
+      if (!option) return '';
+      const rawValue = option.value !== undefined ? option.value : option.label;
+      return getOptionKeyForValue(rawValue);
     }
 
     function getOptionLabel(option) {
@@ -905,16 +913,23 @@
       });
     }
 
+    function isOptionSupported(record, optionValue) {
+      const optionKey = getOptionKeyForValue(optionValue);
+      return getRecordOptions(record).some(option => getOptionKey(option) === optionKey);
+    }
+
     function getWeekOptions(weekRecords) {
       if (!weekRecords.length) return [];
-      const baseOptions = getRecordOptions(weekRecords[0]);
-      let intersection = new Set(baseOptions.map(getOptionKey));
-      for (const record of weekRecords.slice(1)) {
-        const options = new Set(getRecordOptions(record).map(getOptionKey));
-        intersection = new Set([...intersection].filter(option => options.has(option)));
-        if (intersection.size === 0) break;
+      const optionMap = new Map();
+      for (const record of weekRecords) {
+        for (const option of getRecordOptions(record)) {
+          const key = getOptionKey(option);
+          if (!optionMap.has(key)) {
+            optionMap.set(key, option);
+          }
+        }
       }
-      return baseOptions.filter(option => intersection.has(getOptionKey(option)));
+      return Array.from(optionMap.values());
     }
 
     function render() {
