@@ -768,11 +768,17 @@
     function getOptionKeyForValue(rawValue) {
       if (rawValue === undefined) return '';
       if (Array.isArray(rawValue)) {
+        const mappedItems = rawValue.map(item => {
+          const extracted = extractRefId(item);
+          return extracted === null ? item : extracted;
+        });
         if (statusColumnType && statusColumnType.startsWith('RefList')) {
-          return JSON.stringify(normalizeRefListValue(rawValue));
+          return JSON.stringify(normalizeRefListValue(mappedItems));
         }
-        return JSON.stringify(rawValue.map(item => getOptionKeyForValue(item)));
+        return JSON.stringify(mappedItems.map(item => getOptionKeyForValue(item)));
       }
+      const extracted = extractRefId(rawValue);
+      if (extracted !== null) return `${extracted}`;
       if (rawValue instanceof Date) return rawValue.toISOString();
       if (typeof rawValue === 'object') return JSON.stringify(rawValue);
       return `${rawValue}`;
