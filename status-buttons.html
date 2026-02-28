@@ -323,7 +323,6 @@
     let statusRefDisplayColId = null;
     let statusRawById = null;
     let statusMetaBlocked = false;
-    let loggedMissingRefLookup = false;
     let dateColumnId = null;
     let currentWeekStart = getWeekStart(new Date());
 
@@ -401,7 +400,6 @@
 
     grist.onRecords((data, mappings) => {
       records = grist.mapColumnNames(data) || [];
-      console.info('Records updated', { recordCount: records.length, mappings });
       if (mappings) {
         statusColumnId = mappings.Status || null;
         dateColumnId = mappings.Date || null;
@@ -416,7 +414,6 @@
     grist.on('message', (msg) => {
       if (msg.tableId) {
         tableId = msg.tableId;
-        console.info('Table selected', { tableId });
         if (statusColumnId) {
           fetchStatusChoices();
           refreshStatusRawValues();
@@ -426,8 +423,6 @@
 
     async function fetchChoiceStyles(columnId) {
       if (!columnId || !tableId) return null;
-
-      console.info('Fetching choice styles', { tableId, columnId });
 
       try {
         const tables = await grist.docApi.fetchTable('_grist_Tables');
@@ -469,13 +464,6 @@
           }
         }
 
-        console.info('Loaded status choices', {
-          tableId,
-          columnId,
-          choiceCount: choices.length,
-          hasStyles: Object.keys(styles).length > 0,
-          colType
-        });
         return { choices, styles, type: colType };
       } catch (e) {
         console.error('Failed to fetch choice styles from metadata:', e);
@@ -502,7 +490,6 @@
     async function fetchStatusChoices() {
       if (!statusColumnId || !tableId) return;
 
-      console.info('Fetching status choices', { tableId, statusColumnId });
       choiceStyles = {};
       statusColumnType = statusColumnType || inferStatusColumnType() || 'RefList';
 
@@ -560,7 +547,6 @@
 
     async function fetchStatusRefLookup() {
       if (statusMetaBlocked) return;
-      loggedMissingRefLookup = false;
       statusRefLookup = null;
       statusRefTableId = null;
       statusRefDisplayColId = null;
@@ -596,11 +582,6 @@
         statusRefLookup = lookup;
         statusRefTableId = refTableId;
         statusRefDisplayColId = displayColId;
-        console.info('Loaded status ref lookup', {
-          refTableId,
-          displayColId,
-          entryCount: lookup.size
-        });
       } catch (e) {
         const message = e && e.message ? e.message : '';
         if (message.includes('ACL_DENY') || message.includes('Blocked by table read access rules')) {
@@ -709,14 +690,19 @@
       }
     }
 
-    async function changeWeekStatus(newStatus) {
+    async function changeWeekStatus(optionLabel) {
       if (!statusColumnId) return;
       try {
         const table = await grist.selectedTable;
         const weekRecords = records.filter(r => isInCurrentWeek(r.Date));
-        const supportedRecords = weekRecords.filter(record => isOptionSupported(record, newStatus));
-        for (const record of supportedRecords) {
-          await table.update({ id: record.id, fields: { [statusColumnId]: coerceStatusValue(newStatus) } });
+        const updates = [];
+        for (const record of weekRecords) {
+          const match = getRecordOptions(record).find(opt => getOptionLabel(opt) === optionLabel);
+          if (!match) continue;
+          updates.push({ id: record.id, fields: { [statusColumnId]: coerceStatusValue(match.value) } });
+        }
+        if (updates.length) {
+          await table.update(updates);
         }
         render();
       } catch (e) {
@@ -894,11 +880,11 @@
       app.onclick = (event) => {
         const button = event.target.closest('button[data-action]');
         if (!button) return;
-        const value = parseOptionValue(button.dataset.value);
         if (button.dataset.action === 'week') {
-          changeWeekStatus(value);
+          changeWeekStatus(button.dataset.label);
           return;
         }
+        const value = parseOptionValue(button.dataset.value);
         if (button.dataset.action === 'status') {
           const rowId = Number(button.dataset.rowId);
           if (Number.isNaN(rowId)) return;
@@ -913,10 +899,6 @@
         return options;
       }
       if (!statusRefLookup) {
-        if (!loggedMissingRefLookup) {
-          console.warn('Status ref lookup unavailable; using raw option values', { statusColumnType });
-          loggedMissingRefLookup = true;
-        }
         return options;
       }
       return options.map(option => {
@@ -946,11 +928,9 @@
       const optionMap = new Map();
       for (const record of weekRecords) {
         for (const option of getRecordOptions(record)) {
-          const key = option && option.value !== undefined
-            ? getOptionKeyForValue(option.value)
-            : getOptionKey(option);
-          if (!optionMap.has(key)) {
-            optionMap.set(key, option);
+          const label = getOptionLabel(option);
+          if (label && !optionMap.has(label)) {
+            optionMap.set(label, option);
           }
         }
       }
@@ -974,7 +954,7 @@
         return `
           <button class="status-btn" 
             data-action="week"
-            data-value="${encodeHtmlAttribute(serializeOptionValue(option.value))}"
+            data-label="${encodeHtmlAttribute(getOptionLabel(option))}"
             style="background: ${bgColor}; color: ${textColor};">
             ${escapeHtml(getOptionLabel(option))}
           </button>
