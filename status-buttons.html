@@ -923,7 +923,9 @@
       const optionMap = new Map();
       for (const record of weekRecords) {
         for (const option of getRecordOptions(record)) {
-          const key = getOptionKey(option);
+          const key = option && option.value !== undefined
+            ? getOptionKeyForValue(option.value)
+            : getOptionKey(option);
           if (!optionMap.has(key)) {
             optionMap.set(key, option);
           }
