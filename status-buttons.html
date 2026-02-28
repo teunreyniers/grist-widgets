@@ -767,8 +767,11 @@
 
     function getOptionKeyForValue(rawValue) {
       if (rawValue === undefined) return '';
-      if (statusColumnType && statusColumnType.startsWith('RefList') && Array.isArray(rawValue)) {
-        return JSON.stringify(normalizeRefListValue(rawValue));
+      if (Array.isArray(rawValue)) {
+        if (statusColumnType && statusColumnType.startsWith('RefList')) {
+          return JSON.stringify(normalizeRefListValue(rawValue));
+        }
+        return JSON.stringify(rawValue.map(item => getOptionKeyForValue(item)));
       }
       if (rawValue instanceof Date) return rawValue.toISOString();
       if (typeof rawValue === 'object') return JSON.stringify(rawValue);
