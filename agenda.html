@@ -210,6 +210,60 @@
       font-style: italic;
     }
 
+    /* Show more */
+    .item-body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .item-details {
+      display: none;
+      font-size: 13px;
+      color: var(--muted-foreground);
+      overflow-wrap: anywhere;
+      padding-top: 4px;
+      border-top: 1px solid var(--border);
+      margin-top: 4px;
+    }
+
+    .item-details strong {
+      font-weight: 700;
+    }
+
+    .item-details em {
+      font-style: italic;
+    }
+
+    .item-card.expanded .item-details {
+      display: block;
+    }
+
+    .item-more-btn {
+      align-self: flex-start;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--muted-foreground);
+      padding: 2px 0;
+      line-height: 1.4;
+      transition: color 0.1s ease;
+    }
+
+    .item-more-btn:hover {
+      color: var(--foreground);
+    }
+
+    .item-more-btn:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
+      border-radius: 2px;
+    }
+
     /* Empty / config states */
     .empty-state,
     .config-message {
@@ -274,7 +328,8 @@
     grist.ready({
       columns: [
         { name: 'Datetime', title: 'Datetime', type: 'DateTime,Date' },
-        { name: 'Label',    title: 'Label',    type: 'Text' }
+        { name: 'Label',    title: 'Label',    type: 'Text' },
+        { name: 'Details',  title: 'Details',  type: 'Text', optional: true }
       ],
       requiredAccess: 'read table'
     });
@@ -391,7 +446,7 @@
         if (dt < start || dt > end) continue;
         const key = isoDateKey(dt);
         if (!grouped.has(key)) grouped.set(key, []);
-        grouped.get(key).push({ dt, label: record.Label });
+        grouped.get(key).push({ id: record.id, dt, label: record.Label, details: record.Details || '' });
       }
 
       // Sort dates
@@ -422,12 +477,21 @@
           const items = grouped.get(key);
           // Sort items by time within the day
           items.sort((a, b) => a.dt - b.dt);
-          const itemsHtml = items.map(item => `
-            <div class="item-card">
-              <span class="item-time">${formatTime(item.dt)}</span>
-              <span class="item-label">${renderLabel(item.label)}</span>
-            </div>
-          `).join('');
+          const itemsHtml = items.map(item => {
+            const detailsHtml = item.details
+              ? `<div class="item-details">${renderLabel(item.details)}</div>
+                 <button class="item-more-btn" data-toggle="${item.id}" aria-expanded="false">Show more ▾</button>`
+              : '';
+            return `
+              <div class="item-card" data-id="${item.id}">
+                <span class="item-time">${formatTime(item.dt)}</span>
+                <div class="item-body">
+                  <span class="item-label">${renderLabel(item.label)}</span>
+                  ${detailsHtml}
+                </div>
+              </div>
+            `;
+          }).join('');
           return `
             <div class="date-group">
               <div class="date-header">${escapeHtml(formatDateHeader(key))}</div>
@@ -439,6 +503,17 @@
 
       app.innerHTML = headerHtml + listHtml;
     }
+
+    // Toggle handler — delegated so it survives re-renders
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('.item-more-btn');
+      if (!btn) return;
+      const card = btn.closest('.item-card');
+      if (!card) return;
+      const expanded = card.classList.toggle('expanded');
+      btn.setAttribute('aria-expanded', expanded);
+      btn.textContent = expanded ? 'Show less ▴' : 'Show more ▾';
+    });
 
     function switchView(mode) {
       viewMode = mode;
