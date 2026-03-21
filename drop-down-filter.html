@@ -145,7 +145,11 @@ function updateDropdown(options, idx) {
       dropdown.appendChild(optionElement);
     });
 
-    selectRows(currentvalue);
+    selectRows(
+      document.getElementById('dropdown1').value,
+      document.getElementById('dropdown2').value,
+      document.getElementById('type').innerHTML
+    );
   }
 }
 
