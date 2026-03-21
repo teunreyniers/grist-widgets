@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Drop-down Widget</title>
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--grist-theme-page-bg);
+      color: var(--grist-theme-text);
+    }
+    #container {
+      position: relative;
+      height: 100%;
+    }
+    #search {
+      width: 100%;
+      box-sizing: border-box;
+      margin: 0;
+      padding: 2px;
+      height: 100%;
+      background-color: var(--grist-theme-page-panels-main-panel-bg);
+      border: none;
+      color: var(--grist-theme-text);
+    }
+    .td100 {
+      width: 100%;
+      height: 100%;
+    }
+    .td50 {
+      width: 50%;
+      height: 100%;
+    }
+    .dropdown {
+      width: 100%;
+      box-sizing: border-box;
+      margin: 0;
+      padding: 2px;
+      height: 100%;
+      background-color: var(--grist-theme-page-panels-main-panel-bg);
+      border: 1px solid var(--grist-theme-table-body-border);
+      color: var(--grist-theme-text);
+    }
+    #error {
+      display: none;
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 50%;
+      height: 100%;
+      background: rgba(208, 2, 27, 0.8);
+      color: white;
+      padding: 2px;
+      font-size: 12px;
+      overflow-y: auto;
+      box-sizing: border-box;
+    }
+    .dropdown:focus {
+      outline: 2px solid var(--grist-theme-cursor);
+    }
+    .tag {
+      background-color: lightgray;
+      font-size: small;
+      border-radius: 4px;
+      border-color: transparent;
+    }
+    .hiddenItem {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <table id="search">
+      <tr>
+        <td id="td1" class="td100"><select id="dropdown1" class="dropdown"></select></td>
+        <td><button id="type" class="tag _grain803_ hiddenItem" onclick="tagclick()">AND</button></td>
+        <td id="td2" class="td50"><select id="dropdown2" class="dropdown hiddenItem"></select></td>
+        <td><button class="tag _grain803_" onclick="clearsearch()">X</button></td>
+      </tr>
+    </table>
+    <div id="error"></div>
+  </div>
+  <div id="config" style="display: none;">
+    <label>Session ID:</label>
+    <input type="text" id="sessionid">
+    <button id="save" onclick="saveOption()">Apply</button>
+  </div>
+  <script>
+let currentoptions = [];
+let allRecords = [];
+let sessionID = "";
+let column = "";
+let column2 = "";
+const typeAND = "AND", typeOR = 'OR';
+
+// Parse query parameters — ?autoselect=1 will auto-select the first item
+const urlParams = new URLSearchParams(window.location.search);
+const autoselect = urlParams.get('autoselect') === '1' || urlParams.get('autoselect') === 'true';
+
+function showError(msg) {
+  let el = document.getElementById('error');
+  if (!msg) {
+    el.style.display = 'none';
+  } else {
+    el.innerHTML = msg;
+    el.style.display = 'block';
+  }
+}
+
+function updateDropdown(options, idx) {
+  const uniqoptions = [""].concat(uniq(options).sort());
+
+  const dropdown = document.getElementById('dropdown' + idx);
+  dropdown.classList.remove('hiddenItem');
+  let currentvalue = uniqoptions.includes(dropdown.value) ? dropdown.value : undefined;
+  if (currentvalue === undefined && sessionID.length > 0) {
+    const selection = sessionStorage.getItem(sessionID + "_Dropdownfilter_Item" + ((idx > 1) ? idx : ''));
+    if (selection && selection.length > 0) {
+      currentvalue = selection;
+    }
+  }
+
+  // If autoselect is enabled and no value is restored, pick the first real option
+  if (autoselect && (currentvalue === undefined || currentvalue === '') && uniqoptions.length > 1) {
+    currentvalue = uniqoptions[1]; // index 1 = first real option (index 0 is the blank entry)
+  }
+
+  dropdown.innerHTML = '';
+  if (uniqoptions.length === 0) {
+    const optionElement = document.createElement('option');
+    optionElement.textContent = 'No options available';
+    dropdown.appendChild(optionElement);
+    grist.setSelectedRows(null);
+  } else {
+    uniqoptions.forEach((option, index) => {
+      const optionElement = document.createElement('option');
+      optionElement.value = String(option);
+      optionElement.textContent = String(option);
+      if (String(option) === currentvalue) optionElement.setAttribute('selected', '');
+      dropdown.appendChild(optionElement);
+    });
+
+    selectRows(currentvalue);
+  }
+}
+
+function saveOption() {
+  const sid = document.getElementById("sessionid").value;
+  grist.widgetApi.setOption('sessionid', sid);
+}
+
+function initGrist() {
+  grist.ready({
+    columns: [{ name: "OptionsToSelect", title: 'Options to select', type: 'Any' },
+              { name: "OptionsToSelect2", title: '2nd options to select', type: 'Any', optional: true }],
+    requiredAccess: 'read table',
+    allowSelectBy: true,
+    onEditOptions() {
+      document.getElementById("container").style.display = 'none';
+      document.getElementById("config").style.display = '';
+      document.getElementById("sessionid").value = sessionID;
+    },
+  });
+
+  grist.onOptions((customOptions, _) => {
+    customOptions = customOptions || {};
+    sessionID = customOptions.sessionid || "";
+
+    document.getElementById("container").style.display = '';
+    document.getElementById("config").style.display = 'none';
+  });
+
+  grist.onRecords(function (records, mappings) {
+    if (!records || records.length === 0) {
+      updateDropdown([]);
+      grist.setSelectedRows(null);
+      return;
+    }
+
+    allRecords = records;
+    column = mappings.OptionsToSelect;
+    column2 = mappings.OptionsToSelect2;
+    const mapped = grist.mapColumnNames(records);
+
+    showError("");
+    options = mapped.map(record => record.OptionsToSelect).filter(option => option !== null && option !== undefined);
+
+    if (options.length === 0) {
+      showError("No valid options found");
+    }
+    updateDropdown(options, 1);
+
+    const td1 = document.getElementById("td1");
+    if (column2 === null || column2?.length === 0) {
+      td1.classList = "td100";
+      document.getElementById('dropdown2').classList.add('hiddenItem');
+      document.getElementById('type').classList.add('hiddenItem');
+    } else {
+      options = mapped.map(record => record.OptionsToSelect2).filter(option => option !== null && option !== undefined);
+      updateDropdown(options, 2);
+
+      td1.classList = "td50";
+      document.getElementById('type').classList.remove('hiddenItem');
+    }
+  });
+
+  grist.onRecord(function (record, mappings) {});
+
+  grist.onNewRecord(function () {});
+
+  document.getElementById('dropdown1').addEventListener('change', function(event) {
+    selectRows(event.target.value, document.getElementById('dropdown2').value, document.getElementById("type").innerHTML);
+  });
+
+  document.getElementById('dropdown2').addEventListener('change', function(event) {
+    selectRows(document.getElementById('dropdown1').value, event.target.value, document.getElementById("type").innerHTML);
+  });
+}
+
+function selectRows(value1, value2, type) {
+  if (value1?.length === 0 && value2?.length === 0) {
+    grist.setSelectedRows(null);
+  } else {
+    let rows;
+    if (value2?.length === 0) {
+      rows = allRecords.filter((item) => String(item[column]) === value1).map(({id}) => id);
+      if (sessionID.length > 0) sessionStorage.setItem(sessionID + "_Dropdownfilter_Item1", value1);
+    } else if (value1?.length === 0) {
+      rows = allRecords.filter((item) => String(item[column2]) === value2).map(({id}) => id);
+      if (sessionID.length > 0) sessionStorage.setItem(sessionID + "_Dropdownfilter_Item2", value2);
+    } else {
+      if (type === typeOR) {
+        rows = allRecords.filter((item) => String(item[column]) === value1 || String(item[column2]) === value2).map(({id}) => id);
+      } else {
+        rows = allRecords.filter((item) => String(item[column]) === value1 && String(item[column2]) === value2).map(({id}) => id);
+      }
+
+      if (sessionID.length > 0) sessionStorage.setItem(sessionID + "_Dropdownfilter_Item1", value1);
+      if (sessionID.length > 0) sessionStorage.setItem(sessionID + "_Dropdownfilter_Item2", value2);
+    }
+
+    grist.setSelectedRows(rows);
+  }
+}
+
+function clearsearch() {
+  document.getElementById("dropdown1").value = "";
+  document.getElementById("dropdown2").value = "";
+  selectRows('', '', typeAND);
+}
+
+function tagclick() {
+  const type = document.getElementById("type");
+  if (type.innerHTML === typeOR) {
+    type.innerHTML = typeAND;
+  } else {
+    type.innerHTML = typeOR;
+  }
+  selectRows(document.getElementById('dropdown1').value, document.getElementById('dropdown2').value, document.getElementById("type").innerHTML);
+}
+
+function uniq(a) {
+  var seen = {};
+  return a.filter(function(item) {
+    return (seen.hasOwnProperty(item) || item.length <= 0) ? false : (seen[item] = true);
+  });
+}
+
+document.addEventListener('DOMContentLoaded', initGrist);
+  </script>
+</body>
+</html>
