@@ -393,7 +393,8 @@
         { name: 'Status', title: 'Status', type: 'RefList' },
         { name: 'Options', title: 'Options', type: 'ChoiceList', description: 'Per-row status options' },
         { name: 'Date', title: 'Date', type: 'Date,DateTime', description: 'Date or DateTime column', optional: true },
-        { name: 'Details', title: 'Details', type: 'Text', optional: true }
+        { name: 'Details', title: 'Details', type: 'Text', optional: true },
+        { name: 'Highlight', title: 'Highlight', type: 'Bool', description: 'Highlight row yellow when true', optional: true }
       ],
       requiredAccess: 'full'
     });
@@ -986,6 +987,7 @@
       }
 
       app.innerHTML = weekNav + '<div class="records-container">' + filteredRecords.map(record => {
+        const highlighted = !!record.Highlight;
         const title = record.Title || '(no title)';
         const details = record.Details || '';
         const currentStatus = statusRawById && statusRawById.has(record.id)
@@ -995,7 +997,7 @@
         const detailsHtml = details ? `<div class="details">${escapeHtml(details)}</div>` : '';
 
         return `
-          <div class="record">
+          <div class="record" style="${highlighted ? 'background: #fef9c3;' : ''}">
             <div class="record-info">
               <div class="title">${escapeHtml(title)}</div>
               ${detailsHtml}

@@ -329,7 +329,8 @@
       columns: [
         { name: 'Datetime', title: 'Datetime', type: 'DateTime,Date' },
         { name: 'Label',    title: 'Label',    type: 'Text' },
-        { name: 'Details',  title: 'Details',  type: 'Text', optional: true }
+        { name: 'Details',  title: 'Details',  type: 'Text', optional: true },
+        { name: 'Highlight', title: 'Highlight', type: 'Bool', description: 'Highlight item yellow when true', optional: true }
       ],
       requiredAccess: 'read table'
     });
@@ -446,7 +447,7 @@
         if (dt < start || dt > end) continue;
         const key = isoDateKey(dt);
         if (!grouped.has(key)) grouped.set(key, []);
-        grouped.get(key).push({ id: record.id, dt, label: record.Label, details: record.Details || '' });
+        grouped.get(key).push({ id: record.id, dt, label: record.Label, details: record.Details || '', highlight: !!record.Highlight });
       }
 
       // Sort dates
@@ -483,7 +484,7 @@
                  <button class="item-more-btn" data-toggle="${item.id}" aria-expanded="false">Show more ▾</button>`
               : '';
             return `
-              <div class="item-card" data-id="${item.id}">
+              <div class="item-card" data-id="${item.id}" style="${item.highlight ? 'background: #fef9c3;' : ''}">
                 <span class="item-time">${formatTime(item.dt)}</span>
                 <div class="item-body">
                   <span class="item-label">${renderLabel(item.label)}</span>
