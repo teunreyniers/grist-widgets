@@ -131,7 +131,7 @@
 
     .record {
       display: flex;
-      align-items: center;
+      flex-direction: column;
       gap: 12px;
       padding: 16px;
       background: var(--card);
@@ -142,6 +142,68 @@
 
     .record:hover {
       box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+    }
+
+    .record-main {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .record-notes {
+      width: 100%;
+    }
+
+    .note-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      border: 1px dashed var(--border);
+      border-radius: calc(var(--radius) - 2px);
+      background: transparent;
+      color: var(--muted-foreground);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      transition: all 0.15s ease;
+    }
+
+    .note-toggle:hover {
+      background: var(--accent);
+      color: var(--accent-foreground);
+      border-color: var(--ring);
+    }
+
+    .note-toggle:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
+    }
+
+    .note-input {
+      display: block;
+      width: 100%;
+      min-height: 56px;
+      padding: 8px 10px;
+      border: 1px solid var(--input);
+      border-radius: calc(var(--radius) - 2px);
+      background: var(--background);
+      color: var(--foreground);
+      font-family: inherit;
+      font-size: 13px;
+      line-height: 1.5;
+      resize: none;
+      overflow: hidden;
+    }
+
+    .note-input::placeholder {
+      color: var(--muted-foreground);
+    }
+
+    .note-input:focus {
+      outline: none;
+      border-color: var(--ring);
+      box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
     }
 
     .record-info {
@@ -253,10 +315,13 @@
       }
 
       .record {
+        padding: 14px;
+      }
+
+      .record-main {
         flex-direction: column;
         align-items: stretch;
         gap: 12px;
-        padding: 14px;
       }
 
       .title {
@@ -324,6 +389,8 @@
     let statusRawById = null;
     let statusMetaBlocked = false;
     let dateColumnId = null;
+    let notesColumnId = null;
+    const expandedNotes = new Set();
     let currentWeekStart = getWeekStart(new Date());
 
     function getWeekStart(date) {
@@ -394,6 +461,7 @@
         { name: 'Options', title: 'Options', type: 'ChoiceList', description: 'Per-row status options' },
         { name: 'Date', title: 'Date', type: 'Date,DateTime', description: 'Date or DateTime column', optional: true },
         { name: 'Details', title: 'Details', type: 'Text', optional: true },
+        { name: 'Notes', title: 'Notes', type: 'Text', description: 'Editable multiline note, hidden behind a button until filled in', optional: true },
         { name: 'Highlight', title: 'Highlight', type: 'Bool', description: 'Highlight row yellow when true', optional: true }
       ],
       requiredAccess: 'full'
@@ -404,6 +472,7 @@
       if (mappings) {
         statusColumnId = mappings.Status || null;
         dateColumnId = mappings.Date || null;
+        notesColumnId = mappings.Notes || null;
         if (statusColumnId) {
           fetchStatusChoices();
           refreshStatusRawValues();
@@ -876,6 +945,25 @@
         .replace(/>/g, '&gt;');
     }
 
+    function autoResizeNote(textarea) {
+      if (!textarea) return;
+      textarea.style.height = 'auto';
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    }
+
+    async function saveNote(rowId, text) {
+      if (!notesColumnId || Number.isNaN(rowId)) return;
+      const record = records.find(r => r.id === rowId);
+      const current = record && record.Notes !== null && record.Notes !== undefined ? `${record.Notes}` : '';
+      if (current === text) return;
+      try {
+        const table = await grist.selectedTable;
+        await table.update({ id: rowId, fields: { [notesColumnId]: text } });
+      } catch (e) {
+        console.error('Failed to save note:', e);
+      }
+    }
+
     function bindStatusButtons() {
       const app = document.getElementById('app');
       app.onclick = (event) => {
@@ -885,6 +973,15 @@
           changeWeekStatus(button.dataset.label);
           return;
         }
+        if (button.dataset.action === 'add-note') {
+          const rowId = Number(button.dataset.rowId);
+          if (Number.isNaN(rowId)) return;
+          expandedNotes.add(rowId);
+          render();
+          const textarea = app.querySelector(`textarea.note-input[data-row-id="${rowId}"]`);
+          if (textarea) textarea.focus();
+          return;
+        }
         const value = parseOptionValue(button.dataset.value);
         if (button.dataset.action === 'status') {
           const rowId = Number(button.dataset.rowId);
@@ -892,6 +989,19 @@
           changeStatus(rowId, value);
         }
       };
+
+      app.oninput = (event) => {
+        const textarea = event.target.closest('textarea.note-input');
+        if (textarea) autoResizeNote(textarea);
+      };
+
+      app.onfocusout = (event) => {
+        const textarea = event.target.closest('textarea.note-input');
+        if (!textarea) return;
+        saveNote(Number(textarea.dataset.rowId), textarea.value);
+      };
+
+      app.querySelectorAll('textarea.note-input').forEach(autoResizeNote);
     }
 
     function getRecordOptions(record) {
@@ -996,30 +1106,46 @@
         const recordOptions = getRecordOptions(record);
         const detailsHtml = details ? `<div class="details">${escapeHtml(details)}</div>` : '';
 
+        let notesHtml = '';
+        if (notesColumnId) {
+          const noteText = record.Notes === null || record.Notes === undefined ? '' : `${record.Notes}`;
+          const showNote = noteText.trim() !== '' || expandedNotes.has(record.id);
+          notesHtml = showNote
+            ? `<div class="record-notes">
+                <textarea class="note-input" data-action="note" data-row-id="${record.id}" placeholder="Add a note...">${escapeHtml(noteText)}</textarea>
+              </div>`
+            : `<div class="record-notes">
+                <button class="note-toggle" data-action="add-note" data-row-id="${record.id}">+ Note</button>
+              </div>`;
+        }
+
         return `
           <div class="record" style="${highlighted ? 'background: #fef9c3;' : ''}">
-            <div class="record-info">
-              <div class="title">${escapeHtml(title)}</div>
-              ${detailsHtml}
+            <div class="record-main">
+              <div class="record-info">
+                <div class="title">${escapeHtml(title)}</div>
+                ${detailsHtml}
+              </div>
+              <div class="buttons">
+                ${recordOptions.map(option => {
+                  const style = getChoiceStyle(option);
+                  const isActive = isOptionSelected(option.value, currentStatus);
+                  const bgColor = isActive ? (style.fillColor || 'var(--primary)') : 'var(--secondary)';
+                  const textColor = isActive ? (style.textColor || 'var(--primary-foreground)') : 'var(--muted-foreground)';
+                  const activeClass = isActive ? 'active' : '';
+                  return `
+                    <button class="status-btn ${activeClass}"
+                      data-action="status"
+                      data-row-id="${record.id}"
+                      data-value="${encodeHtmlAttribute(serializeOptionValue(option.value))}"
+                      style="background: ${bgColor}; color: ${textColor};">
+                      ${escapeHtml(getOptionLabel(option))}
+                    </button>
+                  `;
+                }).join('')}
+              </div>
             </div>
-            <div class="buttons">
-              ${recordOptions.map(option => {
-                const style = getChoiceStyle(option);
-                const isActive = isOptionSelected(option.value, currentStatus);
-                const bgColor = isActive ? (style.fillColor || 'var(--primary)') : 'var(--secondary)';
-                const textColor = isActive ? (style.textColor || 'var(--primary-foreground)') : 'var(--muted-foreground)';
-                const activeClass = isActive ? 'active' : '';
-                return `
-                  <button class="status-btn ${activeClass}" 
-                    data-action="status"
-                    data-row-id="${record.id}"
-                    data-value="${encodeHtmlAttribute(serializeOptionValue(option.value))}"
-                    style="background: ${bgColor}; color: ${textColor};">
-                    ${escapeHtml(getOptionLabel(option))}
-                  </button>
-                `;
-              }).join('')}
-            </div>
+            ${notesHtml}
           </div>
         `;
       }).join('') + '</div>';
