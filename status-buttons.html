@@ -391,6 +391,8 @@
     let dateColumnId = null;
     let notesColumnId = null;
     const expandedNotes = new Set();
+    const noteSaveTimers = {};
+    const NOTE_SAVE_DEBOUNCE = 600;
     let currentWeekStart = getWeekStart(new Date());
 
     function getWeekStart(date) {
@@ -964,6 +966,24 @@
       }
     }
 
+    function scheduleNoteSave(rowId, text) {
+      if (!notesColumnId || Number.isNaN(rowId)) return;
+      if (noteSaveTimers[rowId]) clearTimeout(noteSaveTimers[rowId]);
+      noteSaveTimers[rowId] = setTimeout(() => {
+        delete noteSaveTimers[rowId];
+        saveNote(rowId, text);
+      }, NOTE_SAVE_DEBOUNCE);
+    }
+
+    function flushNoteSave(rowId, text) {
+      if (Number.isNaN(rowId)) return;
+      if (noteSaveTimers[rowId]) {
+        clearTimeout(noteSaveTimers[rowId]);
+        delete noteSaveTimers[rowId];
+      }
+      saveNote(rowId, text);
+    }
+
     function bindStatusButtons() {
       const app = document.getElementById('app');
       app.onclick = (event) => {
@@ -992,13 +1012,15 @@
 
       app.oninput = (event) => {
         const textarea = event.target.closest('textarea.note-input');
-        if (textarea) autoResizeNote(textarea);
+        if (!textarea) return;
+        autoResizeNote(textarea);
+        scheduleNoteSave(Number(textarea.dataset.rowId), textarea.value);
       };
 
       app.onfocusout = (event) => {
         const textarea = event.target.closest('textarea.note-input');
         if (!textarea) return;
-        saveNote(Number(textarea.dataset.rowId), textarea.value);
+        flushNoteSave(Number(textarea.dataset.rowId), textarea.value);
       };
 
       app.querySelectorAll('textarea.note-input').forEach(autoResizeNote);
@@ -1048,8 +1070,36 @@
       return Array.from(optionMap.values());
     }
 
+    function captureNoteEditing() {
+      const active = document.activeElement;
+      if (active && active.classList && active.classList.contains('note-input')) {
+        return {
+          rowId: active.dataset.rowId,
+          value: active.value,
+          selectionStart: active.selectionStart,
+          selectionEnd: active.selectionEnd
+        };
+      }
+      return null;
+    }
+
+    function restoreNoteEditing(editing) {
+      if (!editing) return;
+      const app = document.getElementById('app');
+      const textarea = app.querySelector(`textarea.note-input[data-row-id="${editing.rowId}"]`);
+      if (!textarea) return;
+      textarea.value = editing.value;
+      autoResizeNote(textarea);
+      textarea.focus();
+      try {
+        textarea.setSelectionRange(editing.selectionStart, editing.selectionEnd);
+      } catch (e) { /* selection not applicable */ }
+    }
+
     function render() {
       const app = document.getElementById('app');
+      const editing = captureNoteEditing();
+      if (editing) expandedNotes.add(Number(editing.rowId));
 
       if (statusColumnType && !statusColumnType.startsWith('RefList')) {
         app.innerHTML = '<div class="config-message">Status column must be a RefList.</div>';
@@ -1150,6 +1200,7 @@
         `;
       }).join('') + '</div>';
       bindStatusButtons();
+      restoreNoteEditing(editing);
     }
 
     function escapeHtml(text) {
